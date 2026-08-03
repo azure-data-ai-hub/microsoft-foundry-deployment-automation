@@ -1,0 +1,371 @@
+name: Deploy Microsoft Foundry
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+      - '.github/workflows/deploy-foundry.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+      - '.github/workflows/deploy-foundry.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - DEV
+          - STG
+          - PROD
+          - PROD-SECONDARY-REGION
+      region:
+        description: 'Optional Azure region override (e.g. westus2). Leave blank to use the region in the .bicepparam file / AZURE_LOCATION.'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: deploy-foundry-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Bicep - ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [DEV, STG, PROD]
+    environment: ${{ matrix.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install/upgrade Bicep CLI (via az cli)
+        shell: bash
+        run: |
+          az bicep install
+          az bicep upgrade
+          az bicep version
+
+      - name: Set environment name to lowercase
+        shell: bash
+        run: echo "ENV_LOWER=$(echo ${{ matrix.environment }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Validate Bicep template
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ vars.AZURE_LOCATION || 'eastus' }}
+          template: ./infra/main.bicep
+          parameters: ./infra/${{ env.ENV_LOWER }}.main.bicepparam
+          deploymentMode: Validate
+          failOnStdErr: false
+
+  whatif:
+    name: What-If Analysis - ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        environment: [DEV, STG, PROD]
+    environment: ${{ matrix.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install/upgrade Bicep CLI (via az cli)
+        shell: bash
+        run: |
+          az bicep install
+          az bicep upgrade
+          az bicep version
+
+      - name: Set environment name to lowercase
+        shell: bash
+        run: echo "ENV_LOWER=$(echo ${{ matrix.environment }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Run What-If
+        id: whatif
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ vars.AZURE_LOCATION || 'eastus' }}
+          template: ./infra/main.bicep
+          parameters: ./infra/${{ env.ENV_LOWER }}.main.bicepparam
+          deploymentMode: Incremental
+          additionalArguments: '--what-if --what-if-result-format FullResourcePayloads'
+          failOnStdErr: false
+
+      - name: Save What-If results
+        run: |
+          echo "${{ steps.whatif.outputs.whatif-result }}" > whatif-${{ matrix.environment }}.txt
+
+      - name: Upload What-If artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatif-${{ matrix.environment }}
+          path: whatif-${{ matrix.environment }}.txt
+          retention-days: 30
+
+      - name: Comment PR with What-If
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const whatifResult = fs.readFileSync('whatif-${{ matrix.environment }}.txt', 'utf8');
+            const body = `## What-If Analysis: ${{ matrix.environment }}
+
+            <details>
+            <summary>Click to expand What-If results</summary>
+
+            \`\`\`
+            ${whatifResult}
+            \`\`\`
+
+            </details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: DEV
+      url: https://portal.azure.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install/upgrade Bicep CLI (via az cli)
+        shell: bash
+        run: |
+          az bicep install
+          az bicep upgrade
+          az bicep version
+
+      - name: Deploy to Azure
+        id: deploy
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ vars.AZURE_LOCATION || 'eastus' }}
+          template: ./infra/main.bicep
+          parameters: ./infra/dev.main.bicepparam
+          deploymentName: 'foundry-dev-${{ github.run_number }}'
+          failOnStdErr: false
+
+      - name: Output deployment results
+        run: |
+          echo "Environment: Dev"
+          echo "Subscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          echo "Resource Group: ${{ steps.deploy.outputs.resourceGroupName }}"
+          echo "Foundry Resource: ${{ steps.deploy.outputs.foundryName }}"
+          echo "Foundry Resource ID: ${{ steps.deploy.outputs.foundryId }}"
+          echo "Foundry Endpoint: ${{ steps.deploy.outputs.foundryEndpoint }}"
+
+  deploy-stg:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: STG
+      url: https://portal.azure.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install/upgrade Bicep CLI (via az cli)
+        shell: bash
+        run: |
+          az bicep install
+          az bicep upgrade
+          az bicep version
+
+      - name: Deploy to Azure
+        id: deploy
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ vars.AZURE_LOCATION || 'eastus' }}
+          template: ./infra/main.bicep
+          parameters: ./infra/stg.main.bicepparam
+          deploymentName: 'foundry-stg-${{ github.run_number }}'
+          failOnStdErr: false
+
+      - name: Output deployment results
+        run: |
+          echo "Environment: Staging"
+          echo "Subscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          echo "Resource Group: ${{ steps.deploy.outputs.resourceGroupName }}"
+          echo "Foundry Resource: ${{ steps.deploy.outputs.foundryName }}"
+          echo "Foundry Resource ID: ${{ steps.deploy.outputs.foundryId }}"
+          echo "Foundry Endpoint: ${{ steps.deploy.outputs.foundryEndpoint }}"
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-stg
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: PROD
+      url: https://portal.azure.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install/upgrade Bicep CLI (via az cli)
+        shell: bash
+        run: |
+          az bicep install
+          az bicep upgrade
+          az bicep version
+
+      - name: Deploy to Azure
+        id: deploy
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ vars.AZURE_LOCATION || 'eastus' }}
+          template: ./infra/main.bicep
+          parameters: ./infra/prod.main.bicepparam
+          deploymentName: 'foundry-prod-${{ github.run_number }}'
+          failOnStdErr: false
+
+      - name: Output deployment results
+        run: |
+          echo "Environment: Production"
+          echo "Subscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          echo "Resource Group: ${{ steps.deploy.outputs.resourceGroupName }}"
+          echo "Foundry Resource: ${{ steps.deploy.outputs.foundryName }}"
+          echo "Foundry Resource ID: ${{ steps.deploy.outputs.foundryId }}"
+          echo "Foundry Endpoint: ${{ steps.deploy.outputs.foundryEndpoint }}"
+
+  deploy-manual:
+    name: Manual Deploy - ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment:
+      name: ${{ github.event.inputs.environment }}
+      url: https://portal.azure.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install/upgrade Bicep CLI (via az cli)
+        shell: bash
+        run: |
+          az bicep install
+          az bicep upgrade
+          az bicep version
+
+      - name: Set environment name to lowercase
+        shell: bash
+        run: echo "ENV_LOWER=$(echo ${{ github.event.inputs.environment }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Determine deployment region
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.region }}" ]; then
+            echo "DEPLOY_REGION=${{ github.event.inputs.region }}" >> $GITHUB_ENV
+            echo "PARAM_OVERRIDES=location=${{ github.event.inputs.region }}" >> $GITHUB_ENV
+          else
+            echo "DEPLOY_REGION=${{ vars.AZURE_LOCATION || 'eastus' }}" >> $GITHUB_ENV
+            echo "PARAM_OVERRIDES=" >> $GITHUB_ENV
+          fi
+
+      - name: Deploy to Azure
+        id: deploy
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ env.DEPLOY_REGION }}
+          template: ./infra/main.bicep
+          parameters: ./infra/${{ env.ENV_LOWER }}.main.bicepparam ${{ env.PARAM_OVERRIDES }}
+          deploymentName: 'foundry-${{ github.event.inputs.environment }}-${{ github.run_number }}'
+          failOnStdErr: false
+
+      - name: Output deployment results
+        run: |
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Subscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          echo "Resource Group: ${{ steps.deploy.outputs.resourceGroupName }}"
+          echo "Foundry Resource: ${{ steps.deploy.outputs.foundryName }}"
+          echo "Foundry Resource ID: ${{ steps.deploy.outputs.foundryId }}"
+          echo "Foundry Endpoint: ${{ steps.deploy.outputs.foundryEndpoint }}"

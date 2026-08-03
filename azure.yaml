@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: microsoft-foundry-deployment-automation
+metadata:
+  template: microsoft-foundry-deployment-automation@0.0.1
+
+# Infrastructure configuration
+infra:
+  provider: bicep
+  path: infra
+  module: main
+  parameters:
+    - name: namePrefix
+      value: "{{ .Env.namePrefix }}"
+    - name: location
+      value: "{{ .Env.location }}"
+    - name: resourceGroupName
+      value: "{{ .Env.resourceGroupName }}"
+    - name: kvName
+      value: "{{ .Env.kvName }}"
+    - name: storageName
+      value: "{{ .Env.storageName }}"
+    - name: foundryName
+      value: "{{ .Env.foundryName }}"
+    - name: foundrySubdomain
+      value: "{{ .Env.foundrySubdomain }}"
+    - name: agentSetupType
+      value: "{{ .Env.agentSetupType }}"
+    - name: cosmosDBName
+      value: "{{ .Env.cosmosDBName }}"
+    - name: aiSearchName
+      value: "{{ .Env.aiSearchName }}"
+    - name: deployApigeeIntegration
+      value: "{{ .Env.deployApigeeIntegration }}"
+    - name: apigeeGatewayAppDisplayName
+      value: "{{ .Env.apigeeGatewayAppDisplayName }}"
+
+# Deployment hooks - prompt for environment-specific settings
+hooks:
+  preprovision:
+    posix:
+      shell: sh
+      run: |
+        echo "╔════════════════════════════════════════════════════════════════╗"
+        echo "║       Microsoft Foundry - Multi-Subscription Deployment         ║"
+        echo "╚════════════════════════════════════════════════════════════════╝"
+        echo ""
+        echo "This deployment supports separate subscriptions per environment."
+        echo "You will be prompted for subscription and resource group details."
+        echo ""
+    windows:
+      shell: pwsh
+      run: |
+        Write-Host "╔════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+        Write-Host "║       Microsoft Foundry - Multi-Subscription Deployment         ║" -ForegroundColor Cyan
+        Write-Host "╚════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "This deployment supports separate subscriptions per environment." -ForegroundColor Yellow
+        Write-Host "You will be prompted for subscription and resource group details." -ForegroundColor Yellow
+        Write-Host ""
+
+  postprovision:
+    posix:
+      shell: sh
+      run: |
+        echo ""
+        echo "✅ Deployment completed successfully!"
+        echo ""
+        echo "📊 Deployment Summary:"
+        echo "   Environment: ${AZURE_ENV_NAME}"
+        echo "   Subscription: ${AZURE_SUBSCRIPTION_ID}"
+        echo "   Resource Group: ${AZURE_RESOURCE_GROUP}"
+        echo "   Location: ${AZURE_LOCATION}"
+        echo ""
+    windows:
+      shell: pwsh
+      run: |
+        Write-Host ""
+        Write-Host "✅ Deployment completed successfully!" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "📊 Deployment Summary:" -ForegroundColor Cyan
+        Write-Host "   Environment: $env:AZURE_ENV_NAME" -ForegroundColor White
+        Write-Host "   Subscription: $env:AZURE_SUBSCRIPTION_ID" -ForegroundColor White
+        Write-Host "   Resource Group: $env:AZURE_RESOURCE_GROUP" -ForegroundColor White
+        Write-Host "   Location: $env:AZURE_LOCATION" -ForegroundColor White
+        Write-Host ""

@@ -1,0 +1,13 @@
+# Azure environment folders (contain subscription IDs/secrets)
+.azure/
+
+# Bicep compiled output
+*.json.bak
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.log
+
+# What-if output artifacts
+whatif-*.txt
