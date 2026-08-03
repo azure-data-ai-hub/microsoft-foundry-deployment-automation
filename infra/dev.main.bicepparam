@@ -22,7 +22,7 @@ param projects = [
 
 // This resource group must already exist before deployment (Bicep never creates it).
 // The CI/CD pipeline pre-creates it via `az group create` before invoking this template.
-param resourceGroupName = 'dev-mfd-foundry-rg'
+param resourceGroupName = 'dev-mfd-foundry-standard-rg'
 
 // Microsoft Foundry resource configuration (Microsoft Entra ID / AAD authentication only)
 param foundryName = 'devmfdfoundry001'
@@ -130,9 +130,9 @@ param deployRoleAssignments = true
 // To switch to Standard Agent Setup (this repo deploys and owns the Key Vault, Cosmos DB,
 // AI Search and Storage backing resources), uncomment the lines below and set globally-unique
 // names (all four must be globally unique across Azure):
-// param agentSetupType = 'Standard'
-// param kvName = 'devmfdkv001'
-// param storageName = 'devmfdstor001'
-// param cosmosDBName = 'devmfdcosmos001'
-// param aiSearchName = 'devmfdsearch001'
+param agentSetupType = 'Standard'
+param kvName = 'devmfdkv001'
+param storageName = 'devmfdstor001'
+param cosmosDBName = 'devmfdcosmos001'
+param aiSearchName = 'devmfdsearch001'
 // See: https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/capability-hosts
