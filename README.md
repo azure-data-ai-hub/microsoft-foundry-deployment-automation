@@ -222,6 +222,8 @@ Use GitHub Environments (`DEV`, `STG`, `PROD`) with required reviewers on `STG`/
 
 ## Troubleshooting
 
+- **`AADSTS700213: No matching federated identity record found ...`** on the *Azure Login (OIDC)* step: the App Registration has no federated credential whose `subject` matches `repo:<owner>/<repo>:environment:<ENV>` (the workflow jobs run in GitHub Environments, so the subject is environment-scoped, not branch-scoped). Create one per environment with the `az ad app federated-credential create` command above, and make sure `AZURE_CLIENT_ID`/`AZURE_TENANT_ID` secrets on that environment point at the same app.
+- **Workflow fails on *Verify Azure OIDC configuration***: one or more of `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` is missing from the GitHub Environment secrets.
 - **Name already taken**: Microsoft Foundry resource name (and Key Vault/Storage/Cosmos DB/AI Search names, if using Standard Agent Setup) must be globally unique — pick a new suffix.
 - **Role assignment failures**: `deployRoleAssignments` requires the deploying identity to have **Owner** or **User Access Administrator** on the resource group/subscription. Set it to `false` and assign roles manually if you lack that permission.
 - **Soft-deleted Key Vault name conflict** *(Standard Agent Setup only)*: purge the soft-deleted vault (`az keyvault purge --name <name>`) or choose a new name.

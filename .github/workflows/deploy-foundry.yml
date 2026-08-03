@@ -53,6 +53,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Verify Azure OIDC configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [ -n "$AZURE_CLIENT_ID" ] || missing+=("AZURE_CLIENT_ID")
+          [ -n "$AZURE_TENANT_ID" ] || missing+=("AZURE_TENANT_ID")
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing+=("AZURE_SUBSCRIPTION_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s) for Azure OIDC login in environment '${{ matrix.environment }}': ${missing[*]}. Add them as environment secrets (Settings > Environments > ${{ matrix.environment }} > Secrets)."
+            exit 1
+          fi
+          echo "Azure OIDC secrets are present. The App Registration must also have a federated credential with:"
+          echo "  issuer:  https://token.actions.githubusercontent.com"
+          echo "  subject: repo:${{ github.repository }}:environment:${{ matrix.environment }}"
+          echo "  audience: api://AzureADTokenExchange"
+          echo "A mismatch here surfaces as AADSTS700213 in the next step. See docs/deployment-guide.md."
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -104,6 +125,27 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Verify Azure OIDC configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [ -n "$AZURE_CLIENT_ID" ] || missing+=("AZURE_CLIENT_ID")
+          [ -n "$AZURE_TENANT_ID" ] || missing+=("AZURE_TENANT_ID")
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing+=("AZURE_SUBSCRIPTION_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s) for Azure OIDC login in environment '${{ matrix.environment }}': ${missing[*]}. Add them as environment secrets (Settings > Environments > ${{ matrix.environment }} > Secrets)."
+            exit 1
+          fi
+          echo "Azure OIDC secrets are present. The App Registration must also have a federated credential with:"
+          echo "  issuer:  https://token.actions.githubusercontent.com"
+          echo "  subject: repo:${{ github.repository }}:environment:${{ matrix.environment }}"
+          echo "  audience: api://AzureADTokenExchange"
+          echo "A mismatch here surfaces as AADSTS700213 in the next step. See docs/deployment-guide.md."
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
@@ -195,6 +237,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Verify Azure OIDC configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [ -n "$AZURE_CLIENT_ID" ] || missing+=("AZURE_CLIENT_ID")
+          [ -n "$AZURE_TENANT_ID" ] || missing+=("AZURE_TENANT_ID")
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing+=("AZURE_SUBSCRIPTION_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s) for Azure OIDC login in environment 'DEV': ${missing[*]}. Add them as environment secrets (Settings > Environments > DEV > Secrets)."
+            exit 1
+          fi
+          echo "Azure OIDC secrets are present. The App Registration must also have a federated credential with:"
+          echo "  issuer:  https://token.actions.githubusercontent.com"
+          echo "  subject: repo:${{ github.repository }}:environment:DEV"
+          echo "  audience: api://AzureADTokenExchange"
+          echo "A mismatch here surfaces as AADSTS700213 in the next step. See docs/deployment-guide.md."
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -251,6 +314,27 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Verify Azure OIDC configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [ -n "$AZURE_CLIENT_ID" ] || missing+=("AZURE_CLIENT_ID")
+          [ -n "$AZURE_TENANT_ID" ] || missing+=("AZURE_TENANT_ID")
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing+=("AZURE_SUBSCRIPTION_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s) for Azure OIDC login in environment 'STG': ${missing[*]}. Add them as environment secrets (Settings > Environments > STG > Secrets)."
+            exit 1
+          fi
+          echo "Azure OIDC secrets are present. The App Registration must also have a federated credential with:"
+          echo "  issuer:  https://token.actions.githubusercontent.com"
+          echo "  subject: repo:${{ github.repository }}:environment:STG"
+          echo "  audience: api://AzureADTokenExchange"
+          echo "A mismatch here surfaces as AADSTS700213 in the next step. See docs/deployment-guide.md."
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
@@ -309,6 +393,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Verify Azure OIDC configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [ -n "$AZURE_CLIENT_ID" ] || missing+=("AZURE_CLIENT_ID")
+          [ -n "$AZURE_TENANT_ID" ] || missing+=("AZURE_TENANT_ID")
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing+=("AZURE_SUBSCRIPTION_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s) for Azure OIDC login in environment 'PROD': ${missing[*]}. Add them as environment secrets (Settings > Environments > PROD > Secrets)."
+            exit 1
+          fi
+          echo "Azure OIDC secrets are present. The App Registration must also have a federated credential with:"
+          echo "  issuer:  https://token.actions.githubusercontent.com"
+          echo "  subject: repo:${{ github.repository }}:environment:PROD"
+          echo "  audience: api://AzureADTokenExchange"
+          echo "A mismatch here surfaces as AADSTS700213 in the next step. See docs/deployment-guide.md."
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -364,6 +469,27 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Verify Azure OIDC configuration
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          missing=()
+          [ -n "$AZURE_CLIENT_ID" ] || missing+=("AZURE_CLIENT_ID")
+          [ -n "$AZURE_TENANT_ID" ] || missing+=("AZURE_TENANT_ID")
+          [ -n "$AZURE_SUBSCRIPTION_ID" ] || missing+=("AZURE_SUBSCRIPTION_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secret(s) for Azure OIDC login in environment '${{ github.event.inputs.environment }}': ${missing[*]}. Add them as environment secrets (Settings > Environments > ${{ github.event.inputs.environment }} > Secrets)."
+            exit 1
+          fi
+          echo "Azure OIDC secrets are present. The App Registration must also have a federated credential with:"
+          echo "  issuer:  https://token.actions.githubusercontent.com"
+          echo "  subject: repo:${{ github.repository }}:environment:${{ github.event.inputs.environment }}"
+          echo "  audience: api://AzureADTokenExchange"
+          echo "A mismatch here surfaces as AADSTS700213 in the next step. See docs/deployment-guide.md."
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
