@@ -47,7 +47,7 @@ param foundryModelDeployments = [
     name: 'gpt-5.5'
     model: {
       name: 'gpt-5.5'
-      version: '2026-04-23'
+      version: '2026-04-24'
     }
     sku: {
       name: 'GlobalStandard'
@@ -68,10 +68,10 @@ param foundryModelDeployments = [
   }
   {
     // Optimized for ChatGPT-style conversational tasks
-    name: 'gpt-5.3'
+    name: 'gpt-5.3-chat'
     model: {
-      name: 'gpt-5.3'
-      version: 'chat-latest'
+      name: 'gpt-5.3-chat'
+      version: '2026-03-03'
     }
     sku: {
       name: 'GlobalStandard'
