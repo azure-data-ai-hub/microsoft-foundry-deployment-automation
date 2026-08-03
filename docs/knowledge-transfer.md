@@ -11,7 +11,7 @@ This document supports a knowledge-transfer (KT) session between the Microsoft d
 | 0:00–0:10 | Engagement recap: success criteria & deliverables | This document §3 |
 | 0:10–0:25 | Architecture walkthrough (resource model, Basic vs. Standard Agent Setup) | `docs/architecture.md` §2-3 |
 | 0:25–0:35 | Live demo: deploy to DEV via Azure CLI | `docs/deployment-guide.md` §3 |
-| 0:35–0:45 | Live demo: GitHub Actions pipeline (PR → validate/whatif → merge → deploy) | `docs/deployment-guide.md` §4 |
+| 0:35–0:45 | Live demo: GitHub Actions pipeline (PR → validate → deploy-manual) | `docs/deployment-guide.md` §4 |
 | 0:45–0:55 | Live demo: onboard a new model via parameter change only | `docs/deployment-guide.md` §5 |
 | 0:55–1:05 | Live demo: multi-region deployment pattern | `docs/deployment-guide.md` §6 |
 | 1:05–1:15 | Entra ID / Apigee integration walkthrough | `docs/architecture.md` §4.1, `docs/deployment-guide.md` §7 |

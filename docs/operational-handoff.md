@@ -25,7 +25,7 @@
   - Token/quota throttling (`429` responses from Azure OpenAI/Foundry endpoints)
   - Latency (P95/P99 response time)
 - **Azure Monitor / Log Analytics** — route diagnostic settings from the Foundry resource (and Standard Agent Setup resources: Cosmos DB, Storage, AI Search) to a central Log Analytics workspace for centralized querying (`azure_mcp-monitor` tool or `az monitor diagnostic-settings create`).
-- **Role assignment drift** — periodically run `az deployment sub what-if` against each environment's `.bicepparam` file to detect out-of-band changes.
+- **Role assignment drift** — periodically run `az deployment sub validate` (or `what-if` ad hoc via `az deployment sub what-if`) against each environment's `.bicepparam` file to detect out-of-band changes.
 
 ## 4. Scaling
 
@@ -41,7 +41,7 @@
 | Model inference failures / 5xx errors | Check Foundry resource health in Azure Portal; check Application Insights failure telemetry; check regional Azure service health. |
 | 401/403 errors from consumers | Confirm caller identity has the correct RBAC role (e.g., **Cognitive Services OpenAI User**) on the Foundry resource; for Apigee-routed traffic, confirm the gateway's Entra ID token is valid and not expired. |
 | Capacity/quota errors (429) | Check `az cognitiveservices usage list --location <region>`; request quota increase or redistribute traffic to a secondary region. |
-| Deployment pipeline failure | Check the `validate`/`whatif`/`deploy-*` job logs in GitHub Actions; most common cause is a naming collision or missing RBAC permission on the CI service principal — see `docs/deployment-guide.md` §8. |
+| Deployment pipeline failure | Check the `validate`/`deploy-manual` job logs in GitHub Actions; most common cause is a naming collision or missing RBAC permission on the CI service principal — see `docs/deployment-guide.md` §8. |
 | Suspected credential compromise (Apigee gateway) | Rotate the App Registration's client secret/certificate immediately: `az ad app credential list --id <appId>` then `az ad app credential delete` / `az ad app credential reset`. No Bicep changes needed since secrets are never stored in IaC. |
 
 ## 6. Cost Management
@@ -59,9 +59,9 @@
 
 ## 8. Change Management
 
-- All infrastructure changes go through a pull request with the automated `validate` + `whatif` checks; **What-If output must be reviewed** before merge/approval, especially for `STG`/`PROD`.
+- All infrastructure changes go through a pull request with the automated `validate` check; review the Bicep diff/plan before merge/approval, especially for `STG`/`PROD`.
 - Production deployments require GitHub Environment approval (configure required reviewers on the `PROD` GitHub Environment).
-- Emergency/out-of-band changes use the `deploy-manual` workflow dispatch — still goes through the same Bicep validation, just skips the sequential dev→stg→prod gate.
+- All deployments — including emergency/out-of-band changes — go through the `deploy-manual` workflow dispatch, which runs the same Bicep validation before deploying.
 
 ## 9. Knowledge Retention
 

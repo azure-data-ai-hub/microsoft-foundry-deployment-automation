@@ -9,8 +9,8 @@ Infrastructure-as-code solution for deploying **Microsoft Foundry** (Azure AI Fo
 - **Azure Developer CLI (azd)** for interactive multi-subscription deployments
 - **GitHub Actions** with OIDC authentication (no stored secrets)
 - **Environment-specific parameters** (dev, staging, production)
-- **Automated What-If analysis** on pull requests
-- **Multi-environment deployment pipeline** (dev → stg → prod) with approval gates
+- **Simple two-stage pipeline**: automated `validate` on every PR/push, on-demand `deploy-manual` for actual deployments
+- **Multi-environment support** (dev → stg → prod) with GitHub Environment approval gates on manual deploys
 
 > **Resource model:** This deploys a **Microsoft Foundry resource** — a `Microsoft.CognitiveServices/accounts` resource (kind `AIServices`) with `allowProjectManagement: true` — with Foundry Projects as child resources (`Microsoft.CognitiveServices/accounts/projects`). This is the current Foundry resource model and does **not** use the legacy Hub/Project `Microsoft.MachineLearningServices/workspaces` pattern.
 
@@ -22,7 +22,7 @@ Infrastructure-as-code solution for deploying **Microsoft Foundry** (Azure AI Fo
 .
 ├── .github
 │   └── workflows
-│       └── deploy-foundry.yml       # CI/CD pipeline (validate, what-if, deploy)
+│       └── deploy-foundry.yml       # CI/CD pipeline (validate, deploy-manual)
 ├── infra
 │   ├── modules
 │   │   ├── foundry.bicep            # Microsoft Foundry resource + model deployments + optional account capability host
@@ -185,10 +185,12 @@ azd up
 
 `.github/workflows/deploy-foundry.yml` implements:
 
-1. **validate** — `az deployment sub validate` for DEV/STG/PROD on pull requests and manual runs (`fail-fast: false` so all three environments are checked even if one fails)
-2. **whatif** — What-If analysis on pull requests, results posted as a PR comment and uploaded as an artifact
-3. **deploy-dev → deploy-stg → deploy-prod** — sequential deployment on push to `main`, gated by GitHub Environment protection rules
-4. **deploy-manual** — on-demand deployment to a chosen environment (`DEV`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) via `workflow_dispatch`, with an optional `region` input to override the target Azure region without editing the `.bicepparam` file
+1. **validate** — `az deployment sub validate` for DEV/STG/PROD on pull requests and pushes to `main` (`fail-fast: false` so all three environments are checked even if one fails)
+2. **deploy-manual** — on-demand deployment to a chosen environment (`DEV`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) via `workflow_dispatch`, with an optional `region` input to override the target Azure region without editing the `.bicepparam` file
+
+This is a deliberately simple pipeline: `validate` gives fast automatic feedback, and all real
+deployments go through the explicit `deploy-manual` trigger — there is no automatic push-to-deploy
+chain and no What-If stage.
 
 The Bicep CLI is installed/upgraded via `az bicep install` / `az bicep upgrade` (no manual binary downloads), and a `concurrency` group prevents overlapping runs of this workflow on the same branch from racing each other.
 
@@ -225,7 +227,7 @@ Use GitHub Environments (`DEV`, `STG`, `PROD`) with required reviewers on `STG`/
 - **Name already taken**: Microsoft Foundry resource name (and Key Vault/Storage/Cosmos DB/AI Search names, if using Standard Agent Setup) must be globally unique — pick a new suffix.
 - **Role assignment failures**: `deployRoleAssignments` requires the deploying identity to have **Owner** or **User Access Administrator** on the resource group/subscription. Set it to `false` and assign roles manually if you lack that permission.
 - **Soft-deleted Key Vault name conflict** *(Standard Agent Setup only)*: purge the soft-deleted vault (`az keyvault purge --name <name>`) or choose a new name.
-- **What-If shows unexpected changes**: confirm the same `deployRoleAssignments` value and existing resource properties (e.g., Key Vault purge protection) match what's already deployed.
+- **`az deployment sub validate` shows unexpected changes**: confirm the same `deployRoleAssignments` value and existing resource properties (e.g., Key Vault purge protection) match what's already deployed.
 
 ## Next Steps
 

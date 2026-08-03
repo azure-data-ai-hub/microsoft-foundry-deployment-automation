@@ -141,10 +141,13 @@ In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `PROD-SE
 
 | Stage | Trigger | Action |
 |---|---|---|
-| `validate` | PR to `main`, manual dispatch | Ensures the resource group exists (`az group create`, idempotent), then `az deployment sub validate` across DEV/STG/PROD matrix |
-| `whatif` | PR to `main` | Ensures the resource group exists, then What-If analysis, posted as PR comment + uploaded artifact |
-| `deploy-dev` → `deploy-stg` → `deploy-prod` | Push to `main` | Ensures the resource group exists, then sequential deploy with GitHub Environment approval gates |
+| `validate` | PR to `main`, push to `main` | Ensures the resource group exists (`az group create`, idempotent), then `az deployment sub validate` across DEV/STG/PROD matrix |
 | `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) |
+
+This is intentionally a simple two-stage pipeline: `validate` gives fast feedback on every PR/push,
+and all actual deployments go through the explicit, auditable `deploy-manual` on-demand trigger
+(GitHub Environment approval gates on `STG`/`PROD` still apply). There is no automatic
+push-to-deploy chain and no What-If stage.
 
 Every job resolves `resourceGroupName` and `location` directly from the target environment's
 `.bicepparam` file and runs `az group create --name <rg> --location <loc>` before validating or
@@ -163,15 +166,15 @@ gh workflow run deploy-foundry.yml -f environment=PROD -f region=westus2
 
 1. Confirm availability: `az cognitiveservices model list --location <region>`.
 2. Add an entry to `foundryModelDeployments` in the target environment's `.bicepparam` file (see `docs/architecture.md` §5 for the schema).
-3. Open a PR — the `validate`/`whatif` stages confirm the change deploys cleanly and show the What-If diff (a single new deployment resource, no other changes).
-4. Merge to trigger the standard `deploy-dev → deploy-stg → deploy-prod` pipeline, or use `deploy-manual` for an out-of-band rollout.
+3. Open a PR — the `validate` stage confirms the change deploys cleanly (`az deployment sub validate`) across DEV/STG/PROD.
+4. Use `deploy-manual` (Actions → Run workflow) to roll out the change to the desired environment(s) in order (DEV → STG → PROD).
 
 ## 6. Deploying a New Region
 
 1. Copy `infra/prod-secondary-region.main.bicepparam` to a new file (e.g., `infra/prod-<region>.main.bicepparam`).
 2. Update `location`, `resourceGroupName`, and all globally-unique resource names (`namePrefix` ≤ 10 chars, `kvName`, `storageName`, `cosmosDBName`, `aiSearchName` if Standard Agent Setup).
-3. Validate and What-If as in §3.2, then deploy via `az deployment sub create` or `deploy-manual` with the `region` input.
-4. Add the new `.bicepparam` filename to the pipeline if you want it included in the automated `validate`/`whatif` matrix (edit the `matrix.environment` list in `deploy-foundry.yml`).
+3. Validate as in §3.2, then deploy via `az deployment sub create` or `deploy-manual` with the `region` input.
+4. Add the new `.bicepparam` filename to the pipeline if you want it included in the automated `validate` matrix (edit the `matrix.environment` list in `deploy-foundry.yml`).
 5. Configure your API gateway / Front Door / Traffic Manager to route to the new region's `foundryEndpoint` output — this framework does not manage cross-region traffic steering (see `docs/architecture.md` §6).
 
 ## 7. Enabling Entra ID / Apigee Gateway Integration
@@ -194,5 +197,5 @@ gh workflow run deploy-foundry.yml -f environment=PROD -f region=westus2
 | Role assignment failures | `deployRoleAssignments` requires Owner/User Access Administrator on the target scope. Set to `false` and assign roles manually if you lack that permission. |
 | Soft-deleted Key Vault conflict | `az keyvault purge --name <name>` or choose a new name (Standard Agent Setup only). |
 | Apigee module fails with permission error | The deploying principal lacks an Entra ID directory role (Azure RBAC alone is insufficient for Graph resource writes). |
-| What-If shows unexpected changes | Confirm `deployRoleAssignments`/`agentSetupType`/`deployApigeeIntegration` values match what's already deployed. |
+| `az deployment sub validate` shows unexpected changes | Confirm `deployRoleAssignments`/`agentSetupType`/`deployApigeeIntegration` values match what's already deployed. |
 | Model deployment fails with capacity/quota error | Check regional quota (`az cognitiveservices usage list --location <region>`) and request a quota increase if needed. |

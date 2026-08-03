@@ -94,7 +94,7 @@ New models are onboarded **without any Bicep changes** by adding an entry to the
 }
 ```
 
-`main.bicep` and `modules/foundry.bicep` treat this as a generic array (`@batchSize(1)` loop over `Microsoft.CognitiveServices/accounts/deployments`), so onboarding a model is a **pure parameter file change** — no module code changes, no new pipeline logic. The GitHub Actions workflow's `validate` and `whatif` stages will pick up the new deployment automatically on the next PR.
+`main.bicep` and `modules/foundry.bicep` treat this as a generic array (`@batchSize(1)` loop over `Microsoft.CognitiveServices/accounts/deployments`), so onboarding a model is a **pure parameter file change** — no module code changes, no new pipeline logic. The GitHub Actions workflow's `validate` stage will pick up the new deployment automatically on the next PR.
 
 ## 6. Multi-Region Deployment
 
@@ -113,7 +113,7 @@ The framework is intentionally modular so it can be reused as the standard IaC p
 - **Environment-parameterized, not hardcoded** — every environment/region is a `.bicepparam` file; the orchestrator (`main.bicep`) and modules never change per environment.
 - **Composable modules** — `infra/modules/*.bicep` are single-purpose and independently testable (`bicep build` per module), so a new initiative can reuse individual modules (e.g., just `role-assignment.bicep` + `foundry.bicep`) without adopting the entire framework.
 - **Config-driven extension points** — new projects, new models, new regions, and Basic vs. Standard Agent Setup are all parameter changes, not code changes.
-- **CI/CD is decoupled from the Bicep** — `.github/workflows/deploy-foundry.yml` is a thin orchestration layer (`validate` → `whatif` → `deploy-*`) that can be copied to a new repository and repointed at new `.bicepparam` files with minimal changes.
+- **CI/CD is decoupled from the Bicep** — `.github/workflows/deploy-foundry.yml` is a thin orchestration layer (`validate` → `deploy-manual`) that can be copied to a new repository and repointed at new `.bicepparam` files with minimal changes.
 
 ## 8. Diagram Source
 
