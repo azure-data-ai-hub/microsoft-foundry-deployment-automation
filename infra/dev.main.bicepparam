@@ -25,8 +25,8 @@ param projects = [
 param resourceGroupName = 'dev-mfd-foundry-standard-rg'
 
 // Microsoft Foundry resource configuration (Microsoft Entra ID / AAD authentication only)
-param foundryName = 'devmfdfoundry001'
-param foundrySubdomain = 'devmfdfoundry001'
+param foundryName = 'devmfdstdfoundry001'
+param foundrySubdomain = 'devmfdstdfoundry001'
 
 // Model Deployments hosted on the Foundry resource
 param foundryModelDeployments = [
