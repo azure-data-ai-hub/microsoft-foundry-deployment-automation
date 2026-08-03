@@ -30,7 +30,6 @@ resource projectCapabilityHost 'Microsoft.CognitiveServices/accounts/projects/ca
   parent: foundry::project
   name: 'caphost-project'
   properties: {
-    capabilityHostKind: 'Agents'
     threadStorageConnections: [
       cosmosDBConnectionName
     ]
