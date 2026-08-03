@@ -71,6 +71,15 @@ jobs:
         shell: bash
         run: echo "ENV_LOWER=$(echo ${{ matrix.environment }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - name: Ensure resource group exists
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          RG=$(grep -oP "(?<=param resourceGroupName = ')[^']+" "$PARAM_FILE")
+          LOC=$(grep -oP "(?<=param location = ')[^']+" "$PARAM_FILE")
+          echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
+          az group create --name "$RG" --location "$LOC" --only-show-errors
+
       - name: Validate Bicep template
         uses: azure/arm-deploy@v2
         with:
@@ -113,6 +122,15 @@ jobs:
       - name: Set environment name to lowercase
         shell: bash
         run: echo "ENV_LOWER=$(echo ${{ matrix.environment }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Ensure resource group exists
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          RG=$(grep -oP "(?<=param resourceGroupName = ')[^']+" "$PARAM_FILE")
+          LOC=$(grep -oP "(?<=param location = ')[^']+" "$PARAM_FILE")
+          echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
+          az group create --name "$RG" --location "$LOC" --only-show-errors
 
       - name: Run What-If
         id: whatif
@@ -191,6 +209,15 @@ jobs:
           az bicep upgrade
           az bicep version
 
+      - name: Ensure resource group exists
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/dev.main.bicepparam"
+          RG=$(grep -oP "(?<=param resourceGroupName = ')[^']+" "$PARAM_FILE")
+          LOC=$(grep -oP "(?<=param location = ')[^']+" "$PARAM_FILE")
+          echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
+          az group create --name "$RG" --location "$LOC" --only-show-errors
+
       - name: Deploy to Azure
         id: deploy
         uses: azure/arm-deploy@v2
@@ -239,6 +266,15 @@ jobs:
           az bicep upgrade
           az bicep version
 
+      - name: Ensure resource group exists
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/stg.main.bicepparam"
+          RG=$(grep -oP "(?<=param resourceGroupName = ')[^']+" "$PARAM_FILE")
+          LOC=$(grep -oP "(?<=param location = ')[^']+" "$PARAM_FILE")
+          echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
+          az group create --name "$RG" --location "$LOC" --only-show-errors
+
       - name: Deploy to Azure
         id: deploy
         uses: azure/arm-deploy@v2
@@ -286,6 +322,15 @@ jobs:
           az bicep install
           az bicep upgrade
           az bicep version
+
+      - name: Ensure resource group exists
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/prod.main.bicepparam"
+          RG=$(grep -oP "(?<=param resourceGroupName = ')[^']+" "$PARAM_FILE")
+          LOC=$(grep -oP "(?<=param location = ')[^']+" "$PARAM_FILE")
+          echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
+          az group create --name "$RG" --location "$LOC" --only-show-errors
 
       - name: Deploy to Azure
         id: deploy
@@ -348,6 +393,15 @@ jobs:
             echo "DEPLOY_REGION=${{ vars.AZURE_LOCATION || 'eastus' }}" >> $GITHUB_ENV
             echo "PARAM_OVERRIDES=" >> $GITHUB_ENV
           fi
+
+      - name: Ensure resource group exists
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          RG=$(grep -oP "(?<=param resourceGroupName = ')[^']+" "$PARAM_FILE")
+          LOC="${{ env.DEPLOY_REGION }}"
+          echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
+          az group create --name "$RG" --location "$LOC" --only-show-errors
 
       - name: Deploy to Azure
         id: deploy

@@ -29,6 +29,8 @@ param kvName = 'prodmfdkv001'
 param storageName = 'prodmfdstor001'
 param cosmosDBName = 'prodmfdcosmos001'
 param aiSearchName = 'prodmfdsearch001'
+// This resource group must already exist before deployment (Bicep never creates it).
+// The CI/CD pipeline pre-creates it via `az group create` before invoking this template.
 param resourceGroupName = 'prod-mfd-foundry-rg'
 
 // Microsoft Foundry resource configuration (Microsoft Entra ID / AAD authentication only)

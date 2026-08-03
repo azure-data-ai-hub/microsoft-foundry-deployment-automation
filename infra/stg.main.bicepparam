@@ -20,6 +20,8 @@ param projects = [
   }
 ]
 
+// This resource group must already exist before deployment (Bicep never creates it).
+// The CI/CD pipeline pre-creates it via `az group create` before invoking this template.
 param resourceGroupName = 'stg-mfd-foundry-rg'
 
 // Microsoft Foundry resource configuration (Microsoft Entra ID / AAD authentication only)

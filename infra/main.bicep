@@ -54,8 +54,12 @@ param aiSearchName string = ''
 @description('SKU for the Azure AI Search service (only used when agentSetupType is Standard)')
 param aiSearchSku string = 'standard'
 
-@description('Resource group name')
-param resourceGroupName string = '${namePrefix}-foundry-rg'
+@description('''Resource group name. This resource group MUST already exist before deployment —
+Bicep never creates it. Pre-create it out-of-band (e.g. via `az group create` in CI/CD or
+manually) so the deploying principal only needs a subscription-scoped role for submitting the
+deployment plus Contributor/User Access Administrator scoped to this resource group, rather than
+subscription-wide resource-group-write rights.''')
+param resourceGroupName string
 
 @description('Deploy role assignments (Key Vault/Storage access for Foundry) and, when agentSetupType is Standard, the Standard Agent Setup RBAC and capability hosts. Requires Owner or User Access Administrator role')
 param deployRoleAssignments bool = false
@@ -90,17 +94,16 @@ var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
 var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
 var cognitiveServicesOpenAIUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 
-// Create Resource Group
-resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
-  name: resourceGroupName
-  location: location
-  tags: mergedTags
-}
+// NOTE: This template never creates the resource group. `resourceGroupName` must reference an
+// already-existing resource group (e.g. pre-created by CI/CD via `az group create`, or manually).
+// This keeps the deploying principal's required Azure RBAC scoped to the resource group itself
+// (Contributor/User Access Administrator) rather than requiring subscription-wide
+// resource-group-write rights just to submit this deployment.
 
 // Deploy Application Insights (if name provided)
 module appInsights 'modules/appinsights.bicep' = if (!empty(appInsightsName)) {
-  name: 'deploy-appinsights-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-appinsights-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     appInsightsName: appInsightsName
     location: location
@@ -111,8 +114,8 @@ module appInsights 'modules/appinsights.bicep' = if (!empty(appInsightsName)) {
 // Deploy Key Vault (Standard Agent Setup secret storage backing resource) - only when
 // agentSetupType is Standard
 module keyVault 'modules/kv.bicep' = if (isStandardAgentSetup) {
-  name: 'deploy-keyvault-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-keyvault-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     kvName: kvName
     location: location
@@ -126,8 +129,8 @@ module keyVault 'modules/kv.bicep' = if (isStandardAgentSetup) {
 // Deploy Storage Account (Standard Agent Setup file storage backing resource) - only when
 // agentSetupType is Standard
 module storage 'modules/storage.bicep' = if (isStandardAgentSetup) {
-  name: 'deploy-storage-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-storage-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     storageName: storageName
     location: location
@@ -140,8 +143,8 @@ module storage 'modules/storage.bicep' = if (isStandardAgentSetup) {
 // Deploy Cosmos DB (Standard Agent Setup thread/conversation storage) - only when
 // agentSetupType is Standard
 module cosmosDB 'modules/cosmosdb.bicep' = if (isStandardAgentSetup) {
-  name: 'deploy-cosmosdb-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-cosmosdb-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     cosmosDBName: cosmosDBName
     location: location
@@ -152,8 +155,8 @@ module cosmosDB 'modules/cosmosdb.bicep' = if (isStandardAgentSetup) {
 // Deploy Azure AI Search (Standard Agent Setup vector store) - only when agentSetupType is
 // Standard
 module aiSearch 'modules/aisearch.bicep' = if (isStandardAgentSetup) {
-  name: 'deploy-aisearch-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-aisearch-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     aiSearchName: aiSearchName
     location: location
@@ -168,8 +171,8 @@ module aiSearch 'modules/aisearch.bicep' = if (isStandardAgentSetup) {
 // Authentication is Microsoft Entra ID (AAD) only - local (API key) auth is disabled.
 // The account-level Agents capability host is deployed only for the Standard Agent Setup.
 module foundry 'modules/foundry.bicep' = {
-  name: 'deploy-foundry-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-foundry-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     foundryName: foundryName
     location: location
@@ -185,8 +188,8 @@ module foundry 'modules/foundry.bicep' = {
 // Only relevant when agentSetupType is Standard (Key Vault is not deployed for Basic).
 // Requires Owner or User Access Administrator role on the resource group
 module kvRoleAssignment 'modules/role-assignment.bicep' = if (deployRoleAssignments && isStandardAgentSetup) {
-  name: 'assign-kv-role-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-kv-role-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     principalId: foundry.outputs.principalId
     roleDefinitionId: keyVaultSecretsUserRoleId
@@ -199,8 +202,8 @@ module kvRoleAssignment 'modules/role-assignment.bicep' = if (deployRoleAssignme
 // Only relevant when agentSetupType is Standard (Storage is not deployed for Basic).
 // Requires Owner or User Access Administrator role on the resource group
 module storageRoleAssignment 'modules/role-assignment.bicep' = if (deployRoleAssignments && isStandardAgentSetup) {
-  name: 'assign-storage-role-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-storage-role-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     principalId: foundry.outputs.principalId
     roleDefinitionId: storageBlobDataContributorRoleId
@@ -214,8 +217,8 @@ module storageRoleAssignment 'modules/role-assignment.bicep' = if (deployRoleAss
 // requires the deploying principal to hold an Entra ID directory role capable of creating
 // Applications/Service Principals, in addition to Azure RBAC Owner/User Access Administrator.
 module apigeeGatewayIdentity 'modules/entra-app-registration.bicep' = if (deployApigeeIntegration) {
-  name: 'deploy-apigee-identity-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-apigee-identity-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     appDisplayName: apigeeGatewayAppDisplayName
     appTags: [for tagItem in items(mergedTags): '${tagItem.key}=${tagItem.value}']
@@ -226,8 +229,8 @@ module apigeeGatewayIdentity 'modules/entra-app-registration.bicep' = if (deploy
 // Foundry resource, so the gateway can call model inference endpoints using an Entra ID
 // access token obtained via its own OAuth2 client-credentials flow.
 module apigeeGatewayRoleAssignment 'modules/role-assignment.bicep' = if (deployApigeeIntegration) {
-  name: 'assign-apigee-role-${uniqueString(rg.id)}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-apigee-role-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     principalId: apigeeGatewayIdentity.?outputs.?servicePrincipalId ?? ''
     roleDefinitionId: cognitiveServicesOpenAIUserRoleId
@@ -239,8 +242,8 @@ module apigeeGatewayRoleAssignment 'modules/role-assignment.bicep' = if (deployA
 // Deploy Foundry Projects as child resources of the Foundry resource. When agentSetupType is
 // Standard, each project also gets Cosmos DB / Storage / AI Search connections.
 module foundryProjects 'modules/project.bicep' = [for (project, index) in projects: {
-  name: 'deploy-project-${project.name}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'deploy-project-${project.name}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     foundryName: foundry.outputs.name
     projectName: project.name
@@ -271,8 +274,8 @@ var deployStandardAgentSetupResources = isStandardAgentSetup && deployRoleAssign
 
 // 1) Storage Blob Data Contributor for each project's managed identity
 module projectStorageRoleAssignment 'modules/role-assignment.bicep' = [for (project, index) in projects: if (deployStandardAgentSetupResources) {
-  name: 'assign-proj-storage-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-proj-storage-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     principalId: foundryProjects[index].outputs.principalId
     roleDefinitionId: storageBlobDataContributorRoleId
@@ -283,8 +286,8 @@ module projectStorageRoleAssignment 'modules/role-assignment.bicep' = [for (proj
 
 // 2) Cosmos DB Operator for each project's managed identity
 module projectCosmosRoleAssignment 'modules/role-assignment.bicep' = [for (project, index) in projects: if (deployStandardAgentSetupResources) {
-  name: 'assign-proj-cosmos-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-proj-cosmos-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     principalId: foundryProjects[index].outputs.principalId
     roleDefinitionId: cosmosDbOperatorRoleId
@@ -298,8 +301,8 @@ module projectCosmosRoleAssignment 'modules/role-assignment.bicep' = [for (proje
 
 // 3) Search Index Data Contributor + Search Service Contributor for each project's managed identity
 module projectSearchIndexRoleAssignment 'modules/role-assignment.bicep' = [for (project, index) in projects: if (deployStandardAgentSetupResources) {
-  name: 'assign-proj-search-idx-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-proj-search-idx-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     principalId: foundryProjects[index].outputs.principalId
     roleDefinitionId: searchIndexDataContributorRoleId
@@ -313,8 +316,8 @@ module projectSearchIndexRoleAssignment 'modules/role-assignment.bicep' = [for (
 }]
 
 module projectSearchServiceRoleAssignment 'modules/role-assignment.bicep' = [for (project, index) in projects: if (deployStandardAgentSetupResources) {
-  name: 'assign-proj-search-svc-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-proj-search-svc-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     principalId: foundryProjects[index].outputs.principalId
     roleDefinitionId: searchServiceContributorRoleId
@@ -329,8 +332,8 @@ module projectSearchServiceRoleAssignment 'modules/role-assignment.bicep' = [for
 
 // 4) Project-level Agents capability host - ties the three connections together
 module projectCapabilityHost 'modules/project-capability-host.bicep' = [for (project, index) in projects: if (deployStandardAgentSetupResources) {
-  name: 'caphost-project-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'caphost-project-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     foundryName: foundry.outputs.name
     projectName: foundryProjects[index].outputs.name
@@ -350,8 +353,8 @@ module projectCapabilityHost 'modules/project-capability-host.bicep' = [for (pro
 // container/database-level role assignments below to this project only. Only needed for the
 // Standard Agent Setup, but harmless to compute unconditionally.
 module projectWorkspaceId 'modules/format-workspace-id.bicep' = [for (project, index) in projects: if (isStandardAgentSetup) {
-  name: 'format-workspace-id-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'format-workspace-id-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     projectWorkspaceId: foundryProjects[index].outputs.workspaceId
   }
@@ -360,8 +363,8 @@ module projectWorkspaceId 'modules/format-workspace-id.bicep' = [for (project, i
 // 5) Storage Blob Data Owner, scoped (via ABAC condition) to only the containers the
 // capability host provisioned for this project
 module projectStorageContainerRoleAssignment 'modules/storage-container-role-assignment.bicep' = [for (project, index) in projects: if (deployStandardAgentSetupResources) {
-  name: 'assign-proj-storage-containers-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-proj-storage-containers-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     storageName: storage.?outputs.?name ?? ''
     projectPrincipalId: foundryProjects[index].outputs.principalId
@@ -375,8 +378,8 @@ module projectStorageContainerRoleAssignment 'modules/storage-container-role-ass
 // 6) Cosmos DB Built-in Data Contributor, scoped to the 'enterprise_memory' database
 // the capability host provisioned for this project
 module projectCosmosContainerRoleAssignment 'modules/cosmosdb-container-role-assignment.bicep' = [for (project, index) in projects: if (deployStandardAgentSetupResources) {
-  name: 'assign-proj-cosmos-containers-${index}-${uniqueString(rg.id, string(index))}'
-  scope: resourceGroup(rg.name)
+  name: 'assign-proj-cosmos-containers-${index}-${uniqueString(subscription().id, resourceGroupName, string(index))}'
+  scope: resourceGroup(resourceGroupName)
   params: {
     cosmosDBName: cosmosDB.?outputs.?name ?? ''
     projectPrincipalId: foundryProjects[index].outputs.principalId
@@ -390,7 +393,7 @@ module projectCosmosContainerRoleAssignment 'modules/cosmosdb-container-role-ass
 
 // Outputs
 @description('Resource Group name')
-output resourceGroupName string = rg.name
+output resourceGroupName string = resourceGroupName
 
 @description('Microsoft Foundry resource ID')
 output foundryId string = foundry.outputs.id
