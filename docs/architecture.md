@@ -14,20 +14,36 @@ This framework deploys the **modern Microsoft Foundry resource model**:
 
 This **replaces** the legacy Hub/Project `Microsoft.MachineLearningServices/workspaces` pattern used by older Azure AI Studio templates. There is no Hub resource in this framework.
 
-```
-Subscription
-└── Resource Group (per environment/region)
-    ├── Microsoft Foundry resource (Microsoft.CognitiveServices/accounts, kind=AIServices)
-    │   ├── Model Deployments (gpt-4o, gpt-5.5, gpt-5.4, gpt-5.3, gpt-5-mini, gpt-5-nano, embeddings, ...)
-    │   ├── Foundry Project: chatbot
-    │   ├── Foundry Project: analytics
-    │   └── Foundry Project: recommendations
-    ├── Application Insights (monitoring/diagnostics)
-    └── [Standard Agent Setup only]
-        ├── Key Vault
-        ├── Storage Account
-        ├── Cosmos DB account
-        └── Azure AI Search service
+```mermaid
+flowchart TD
+    subgraph Subscription["Subscription"]
+        subgraph ResourceGroup["Resource Group per environment/region"]
+            Foundry["Microsoft Foundry resource\nMicrosoft.CognitiveServices/accounts, kind AIServices"]
+            AppInsights["Application Insights\nmonitoring and diagnostics"]
+
+            subgraph FoundryChildren["Foundry children"]
+                Models["Model Deployments\ngpt-4o, gpt-5.5, gpt-5.4, gpt-5.3, gpt-5-mini, gpt-5-nano, embeddings, ..."]
+                Chatbot["Foundry Project: chatbot"]
+                Analytics["Foundry Project: analytics"]
+                Recommendations["Foundry Project: recommendations"]
+            end
+
+            subgraph StandardBacking["Standard Agent Setup backing services only"]
+                KeyVault["Key Vault"]
+                Storage["Storage Account"]
+                Cosmos["Cosmos DB account"]
+                Search["Azure AI Search service"]
+            end
+        end
+    end
+
+    Foundry --> Models
+    Foundry --> Chatbot
+    Foundry --> Analytics
+    Foundry --> Recommendations
+    ResourceGroup --> Foundry
+    ResourceGroup --> AppInsights
+    ResourceGroup --> StandardBacking
 ```
 
 ## 3. Agent Setup Modes
@@ -39,7 +55,24 @@ The `agentSetupType` parameter (`Basic` | `Standard`, default `Basic`) controls 
 | **Basic** | Microsoft manages Cosmos DB/AI Search/Storage automatically behind the scenes. Only the Foundry resource, Projects, and Application Insights are deployed. | Fastest path to a working environment; suitable for dev/test and workloads without strict data-residency/compliance requirements on Agent backing stores. |
 | **Standard** | This framework deploys and owns Key Vault, Storage, Cosmos DB, and AI Search, wired to each Project via AAD-only `connections` resources and account/project-level Agents **capability hosts**. | Production workloads that need control over networking, backup/retention, cost allocation, and compliance for Agent thread storage/vector search/file storage. |
 
-Standard Agent Setup deployment ordering (enforced via `dependsOn` in `main.bicep`):
+The following diagram summarizes how Basic and Standard Agent Setup differ, and the Standard-only deployment ordering that is enforced via `dependsOn` in `main.bicep`:
+
+```mermaid
+flowchart TD
+    AgentSetup["agentSetupType parameter"] --> Basic["Basic Agent Setup"]
+    AgentSetup --> Standard["Standard Agent Setup"]
+
+    Basic --> BasicDeploy["Deploy Foundry resource, Projects, and Application Insights"]
+    BasicDeploy --> BasicManaged["Microsoft manages Cosmos DB, AI Search, and Storage behind the scenes"]
+
+    Standard --> StandardDeploy["Deploy Foundry resource, Projects, Application Insights, Key Vault, Storage, Cosmos DB, and AI Search"]
+    StandardDeploy --> StandardRbac["1. Grant each Project managed identity data-plane RBAC on Storage, Cosmos DB, and AI Search"]
+    StandardRbac --> CapabilityHost["2. Create project-level Agents capability host"]
+    CapabilityHost --> AutoProvision["Azure auto-provisions the project's Agent database and Storage containers"]
+    AutoProvision --> ScopedRoles["3. Grant container/database-scoped roles required by the auto-provisioned resources"]
+```
+
+Standard Agent Setup deployment ordering:
 
 1. Grant each Project's managed identity data-plane RBAC roles on Storage/Cosmos DB/AI Search (Storage Blob Data Contributor, Cosmos DB Operator, Search Index Data Contributor, Search Service Contributor).
 2. Create the project-level Agents capability host (`Microsoft.CognitiveServices/accounts/projects/capabilityHosts`), which triggers Azure to auto-provision the Cosmos DB database and Storage containers used by that project's Agents.
@@ -55,20 +88,21 @@ Standard Agent Setup deployment ordering (enforced via `dependsOn` in `main.bice
 
 For consumers that must call the Foundry resource through an enterprise API gateway (e.g., **Apigee**) rather than calling Azure directly, the framework provisions the Azure-side half of an Entra ID **client-credentials (OAuth2)** trust:
 
-```
-Client / App           Apigee Gateway                          Microsoft Foundry
-   │  (mTLS/API key,       │  1. OAuth2 client_credentials         │
-   │   Apigee-managed)     │     grant -> Entra ID token endpoint  │
-   │──────────────────────▶│     (tenant, client_id, client_secret)│
-   │                       │  2. Entra ID issues access token      │
-   │                       │     (aud=https://cognitiveservices    │
-   │                       │      .azure.com)                      │
-   │                       │──────────────────────────────────────▶│
-   │                       │  3. Foundry validates the AAD token   │
-   │                       │     (disableLocalAuth=true) and the   │
-   │                       │     gateway SP's RBAC role            │
-   │                       │◀──────────────────────────────────────│
-   │◀──────────────────────│  4. Response proxied back              │
+```mermaid
+sequenceDiagram
+    participant Client as Client / App
+    participant Apigee as Apigee Gateway
+    participant Entra as Entra ID token endpoint
+    participant Foundry as Microsoft Foundry
+
+    Client->>Apigee: Request using mTLS/API key managed by Apigee
+    Apigee->>Entra: OAuth2 client_credentials grant with tenant, client_id, client_secret
+    Entra-->>Apigee: Access token issued for aud https://cognitiveservices.azure.com
+    Apigee->>Foundry: Proxied request with bearer token
+    Foundry->>Foundry: Validate Entra ID token because disableLocalAuth is true
+    Foundry->>Foundry: Authorize gateway service principal through RBAC
+    Foundry-->>Apigee: Foundry response
+    Apigee-->>Client: Response proxied back
 ```
 
 - `infra/modules/entra-app-registration.bicep` (via the Microsoft Graph Bicep extension) creates the **Entra ID App Registration + Service Principal** that Apigee uses as its OAuth2 client.
@@ -117,4 +151,4 @@ The framework is intentionally modular so it can be reused as the standard IaC p
 
 ## 8. Diagram Source
 
-A machine-readable architecture diagram (Excalidraw format) can be generated from this document using the `excalidraw` skill if a visual asset is needed for presentations; this document is the source of truth for the logical architecture.
+The Mermaid diagrams embedded in this document are the machine-readable source diagrams for the logical architecture. Keep them updated alongside the surrounding text so GitHub-rendered Markdown remains the source of truth.
