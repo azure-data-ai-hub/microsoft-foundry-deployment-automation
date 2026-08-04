@@ -48,6 +48,12 @@ param agentSetupType string = 'Basic'
 @description('Cosmos DB account name (only required when agentSetupType is Standard)')
 param cosmosDBName string = ''
 
+@description('''Azure region for the Cosmos DB account (only used when agentSetupType is Standard).
+Defaults to the same region as `location`. Override this if Cosmos DB account creation is blocked
+by regional capacity constraints (e.g. ServiceUnavailable/high-demand errors) in the primary
+region — Cosmos DB connections work cross-region from the Foundry resource/project.''')
+param cosmosDBLocation string = ''
+
 @description('Azure AI Search service name (only required when agentSetupType is Standard)')
 param aiSearchName string = ''
 
@@ -85,6 +91,7 @@ var mergedTags = union(
 )
 
 var isStandardAgentSetup = agentSetupType == 'Standard'
+var resolvedCosmosDBLocation = !empty(cosmosDBLocation) ? cosmosDBLocation : location
 
 // RBAC role definition IDs (built-in roles)
 var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
@@ -147,7 +154,7 @@ module cosmosDB 'modules/cosmosdb.bicep' = if (isStandardAgentSetup) {
   scope: resourceGroup(resourceGroupName)
   params: {
     cosmosDBName: cosmosDBName
-    location: location
+    location: resolvedCosmosDBLocation
     tags: mergedTags
   }
 }

@@ -134,5 +134,9 @@ param agentSetupType = 'Standard'
 param kvName = 'devmfdkv001'
 param storageName = 'devmfdstor001'
 param cosmosDBName = 'devmfdcosmos001'
+// eastus is currently experiencing Cosmos DB capacity constraints (ServiceUnavailable on
+// account creation) for this subscription. Override to a nearby region with available
+// capacity; Cosmos DB connects to the Foundry project cross-region without issue.
+param cosmosDBLocation = 'eastus2'
 param aiSearchName = 'devmfdsearch001'
 // See: https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/capability-hosts
