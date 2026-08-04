@@ -103,7 +103,7 @@ Check the `foundryEndpoint`, `foundryId`, and (if Standard Agent Setup) the Key 
 
 ### 4.1 Configure OIDC federation (no stored secrets)
 
-For each GitHub Environment (`DEV`, `STG`, `PROD`, and optionally `DEV-STANDARD`/`PROD-SECONDARY-REGION`):
+For each GitHub Environment (`DEV`, `STG`, `PROD`, and optionally `PROD-SECONDARY-REGION`):
 
 ```powershell
 az ad app create --display-name "microsoft-foundry-deployment-automation-<env>"
@@ -132,24 +132,25 @@ az role assignment create --assignee $appId --role "User Access Administrator" -
 
 ### 4.2 Create GitHub Environments
 
-In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `DEV-STANDARD`/`PROD-SECONDARY-REGION` if using those variants). For each:
+In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `PROD-SECONDARY-REGION` if using the secondary-region example). For each:
 
 - Add secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
 - Add variable `AZURE_LOCATION` (optional, defaults to `eastus`)
 - Add **required reviewers** on `STG`/`PROD` for approval gates
 
-> `DEV-STANDARD` can reuse the same federated credential/service principal as `DEV` (same
-> subscription, same permissions) — just create a second GitHub Environment named
-> `DEV-STANDARD` with an additional federated credential subject
-> (`repo:<owner>/<repo>:environment:DEV-STANDARD`) pointing at the same app registration, and
-> copy the same three secrets into it.
+> `DEV-STANDARD` (the `workflow_dispatch` option that deploys `infra/dev-standard.main.bicepparam`)
+> reuses the `DEV` GitHub Environment's secrets and federated credential automatically — no
+> separate GitHub Environment or federated credential subject is needed. `deploy-foundry.yml`
+> maps the `DEV-STANDARD` input to the `DEV` GitHub Environment (`environment.name` in the
+> `deploy-manual` job) while still selecting `dev-standard.main.bicepparam` for the actual
+> deployment based on the raw input value.
 
 ### 4.3 Pipeline stages
 
 | Stage | Trigger | Action |
 |---|---|---|
 | `validate` | PR to `main`, push to `main` | Ensures the resource group exists (`az group create`, idempotent), then `az deployment sub validate` across DEV/STG/PROD matrix |
-| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) — the environment name is lowercased and mapped directly to `infra/<name>.main.bicepparam` |
+| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`). The `.bicepparam` file is selected from the raw input (`infra/<lowercased-input>.main.bicepparam`), but the GitHub Environment used for secrets/OIDC is `DEV` for both `DEV` and `DEV-STANDARD` |
 
 This is intentionally a simple two-stage pipeline: `validate` gives fast feedback on every PR/push,
 and all actual deployments go through the explicit, auditable `deploy-manual` on-demand trigger

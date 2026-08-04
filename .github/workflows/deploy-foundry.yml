@@ -96,8 +96,11 @@ jobs:
     name: Manual Deploy - ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+    # DEV-STANDARD reuses the DEV GitHub Environment's secrets/federated credential (same
+    # subscription, same service principal) -- only the .bicepparam file differs. Add other
+    # variants here (e.g. STG-STANDARD -> STG) if/when they're introduced.
     environment:
-      name: ${{ github.event.inputs.environment }}
+      name: ${{ github.event.inputs.environment == 'DEV-STANDARD' && 'DEV' || github.event.inputs.environment }}
       url: https://portal.azure.com
 
     steps:
