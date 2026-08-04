@@ -228,6 +228,29 @@ Use GitHub Environments (`DEV`, `STG`, `PROD`) with required reviewers on `STG`/
 - **Role assignment failures**: `deployRoleAssignments` requires the deploying identity to have **Owner** or **User Access Administrator** on the resource group/subscription. Set it to `false` and assign roles manually if you lack that permission.
 - **Soft-deleted Key Vault name conflict** *(Standard Agent Setup only)*: purge the soft-deleted vault (`az keyvault purge --name <name>`) or choose a new name.
 - **`az deployment sub validate` shows unexpected changes**: confirm the same `deployRoleAssignments` value and existing resource properties (e.g., Key Vault purge protection) match what's already deployed.
+- **`AADSTS700213: No matching federated identity record found for presented assertion subject 'repo:<owner>/<repo>:environment:<ENV_NAME>'`**: the federated credential's `subject` doesn't match the GitHub Environment actually being used for the run. Common causes:
+  - The federated credential was created for a different environment name/casing than the one configured in `deploy-foundry.yml`'s `environment:` block for that job (GitHub Environment names are case-sensitive in the OIDC subject).
+  - A new `workflow_dispatch` environment option (e.g. `DEV-STANDARD`) was added without either creating a matching GitHub Environment + federated credential for it, or mapping it to an existing environment's credential in the workflow (see how `DEV-STANDARD` reuses `DEV`'s credential in `deploy-foundry.yml`).
+  - Update or add the federated credential subject to match exactly:
+    ```powershell
+    az ad app federated-credential create --id <appId> --parameters '{
+      "name": "github-<env>",
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject": "repo:<owner>/<repo>:environment:<ENV_NAME>",
+      "audiences": ["api://AzureADTokenExchange"]
+    }'
+    ```
+    (use `az ad app federated-credential update` instead if a credential with that `name` already exists but has the wrong `subject`).
+- **`AuthorizationFailed` on `Microsoft.Resources/deployments/validate/action` or `/write/action`**: the service principal's role assignment (Contributor/User Access Administrator) hasn't propagated yet, is scoped to the wrong resource group/subscription, or was never created. Re-run `az role assignment list --assignee <appId> --all` to confirm the scope and role, and allow a few minutes for propagation after creating a new assignment.
+- **`FlagMustBeSetForRestore` (Cognitive Services/Foundry account)**: the account was soft-deleted by a prior failed/removed deployment and Azure is blocking recreation of the same name. List soft-deleted accounts with `az cognitiveservices account list-deleted`, then purge the specific one: `az cognitiveservices account purge --location <region> --resource-group <rg> --name <name>`.
+- **Cosmos DB stuck in `Failed` provisioning state, retries fail with `BadRequest`**: a previous Cosmos DB creation attempt failed partway and left the account in a bad state that blocks recreation. Check with `az cosmosdb show --name <name> --resource-group <rg> --query provisioningState`, then delete it before retrying: `az cosmosdb delete --name <name> --resource-group <rg> --yes`.
+- **Cosmos DB `ServiceUnavailable` — "currently experiencing high demand ... for the zonal redundant (Availability Zones) accounts"** *(Standard Agent Setup only)*: this is a genuine, non-transient Azure-side regional capacity shortage for new Cosmos DB accounts — it can appear even when `isZoneRedundant` is already `false` in the template (the message text is generic). Workarounds: retry later, or set the `cosmosDBLocation` parameter to a different region with available capacity (Cosmos DB connects to the Foundry project cross-region without issue — see `dev-standard.main.bicepparam` for an example using `eastus2`).
+- **`DeploymentModelNotSupported` for a model deployment** (e.g. `The model 'Format:OpenAI,Name:<model>,Version:<version>' of account deployment is not supported`): the requested model/version isn't available for the Foundry account's region/SKU. List what's actually available before setting `foundryModelDeployments`:
+  ```powershell
+  az cognitiveservices account list-models --name <foundryName> --resource-group <rg> --query "[].{model:name, version:version, sku:skus[0].name}" -o table
+  ```
+- **Bicep warning `BCP037: The property "<x>" is not allowed on objects of type "<Y>"`**: usually means a property from a similar-but-different resource type was copy-pasted (e.g. an account-level capability host property applied to a project-level capability host, which has a different schema). Always check the actual resource type schema for the specific API version rather than assuming symmetry between similarly-named types.
+- **GitHub Actions "Node.js 20 is deprecated" warning**: upgrade third-party actions to their latest major version (e.g. `actions/checkout@v7`, `azure/login@v3`), which declare `node24`. Some actions (e.g. `azure/arm-deploy@v2`) may not have a newer release yet — GitHub Actions runs them on Node 24 anyway via a compatibility shim, so the warning is cosmetic until a new release is published upstream.
 
 ## Next Steps
 
