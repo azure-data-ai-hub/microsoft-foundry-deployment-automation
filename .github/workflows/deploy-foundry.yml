@@ -81,6 +81,33 @@ jobs:
           echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
           az group create --name "$RG" --location "$LOC" --only-show-errors
 
+      - name: Show deployment summary
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          MODEL_COUNT=$(grep -c "model: {" "$PARAM_FILE" || true)
+          PROJECT_COUNT=$(grep -c "description: '" "$PARAM_FILE" || true)
+          AGENT_SETUP=$(grep -oP "(?<=param agentSetupType = ')[^']+" "$PARAM_FILE" || echo 'Basic (default)')
+          echo "::group::Deployment plan - ${{ matrix.environment }}"
+          echo "Template:        ./infra/main.bicep"
+          echo "Parameters file: $PARAM_FILE"
+          echo "Region:          ${{ vars.AZURE_LOCATION || 'eastus' }}"
+          echo "Agent setup:     $AGENT_SETUP"
+          echo ""
+          echo "Resources this template will create/update (Validate mode checks only, does not deploy):"
+          echo "  - Microsoft Foundry account (Microsoft.CognitiveServices/accounts)"
+          echo "  - $MODEL_COUNT Foundry model deployment(s)"
+          echo "  - $PROJECT_COUNT Foundry project(s) + Application Insights connection"
+          if [ "$AGENT_SETUP" = "Standard" ]; then
+            echo "  - Standard Agent Setup backing resources: Key Vault, Storage account, Cosmos DB account, AI Search service"
+            echo "  - Account + project-level Agents capability hosts"
+          fi
+          if grep -q "deployApigeeIntegration = true" "$PARAM_FILE"; then
+            echo "  - Apigee integration: Entra ID App Registration + Service Principal"
+          fi
+          echo "  - Role assignments: $(grep -oP "(?<=param deployRoleAssignments = )\w+" "$PARAM_FILE" || echo 'false')"
+          echo "::endgroup::"
+
       - name: Validate Bicep template
         uses: azure/arm-deploy@v2
         with:
@@ -144,6 +171,37 @@ jobs:
           LOC="${{ env.DEPLOY_REGION }}"
           echo "Creating/verifying resource group '$RG' in '$LOC' (idempotent, no-op if it already exists)"
           az group create --name "$RG" --location "$LOC" --only-show-errors
+          echo "RESOURCE_GROUP=$RG" >> $GITHUB_ENV
+
+      - name: Show deployment summary
+        shell: bash
+        run: |
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          MODEL_COUNT=$(grep -c "model: {" "$PARAM_FILE" || true)
+          PROJECT_COUNT=$(grep -c "description: '" "$PARAM_FILE" || true)
+          AGENT_SETUP=$(grep -oP "(?<=param agentSetupType = ')[^']+" "$PARAM_FILE" || echo 'Basic (default)')
+          DEPLOYMENT_NAME="foundry-${{ github.event.inputs.environment }}-${{ github.run_number }}"
+          echo "::group::Deployment plan - ${{ github.event.inputs.environment }}"
+          echo "Deployment name: $DEPLOYMENT_NAME"
+          echo "Template:        ./infra/main.bicep"
+          echo "Parameters file: $PARAM_FILE"
+          echo "Resource group:  ${{ env.RESOURCE_GROUP }}"
+          echo "Region:          ${{ env.DEPLOY_REGION }}"
+          echo "Agent setup:     $AGENT_SETUP"
+          echo ""
+          echo "Resources this run will create/update:"
+          echo "  - Microsoft Foundry account (Microsoft.CognitiveServices/accounts)"
+          echo "  - $MODEL_COUNT Foundry model deployment(s)"
+          echo "  - $PROJECT_COUNT Foundry project(s) + Application Insights connection"
+          if [ "$AGENT_SETUP" = "Standard" ]; then
+            echo "  - Standard Agent Setup backing resources: Key Vault, Storage account, Cosmos DB account, AI Search service"
+            echo "  - Account + project-level Agents capability hosts"
+          fi
+          if grep -q "deployApigeeIntegration = true" "$PARAM_FILE"; then
+            echo "  - Apigee integration: Entra ID App Registration + Service Principal"
+          fi
+          echo "  - Role assignments: $(grep -oP "(?<=param deployRoleAssignments = )\w+" "$PARAM_FILE" || echo 'false')"
+          echo "::endgroup::"
 
       - name: Deploy to Azure
         id: deploy
@@ -156,6 +214,25 @@ jobs:
           parameters: ./infra/${{ env.ENV_LOWER }}.main.bicepparam ${{ env.PARAM_OVERRIDES }}
           deploymentName: 'foundry-${{ github.event.inputs.environment }}-${{ github.run_number }}'
           failOnStdErr: false
+
+      - name: List deployed resources
+        shell: bash
+        if: always() && steps.deploy.outcome == 'success'
+        run: |
+          DEPLOYMENT_NAME="foundry-${{ github.event.inputs.environment }}-${{ github.run_number }}"
+          echo "::group::Resources created/updated by deployment '$DEPLOYMENT_NAME'"
+          az deployment operation sub list \
+            --name "$DEPLOYMENT_NAME" \
+            --query "[?properties.targetResource!=null].{Resource:properties.targetResource.resourceType, Name:properties.targetResource.resourceName, Status:properties.provisioningState}" \
+            -o table
+          echo "::endgroup::"
+
+          echo "::group::Resource group contents ('${{ env.RESOURCE_GROUP }}') after deployment"
+          az resource list \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --query "[].{Name:name, Type:type, Location:location}" \
+            -o table
+          echo "::endgroup::"
 
       - name: Output deployment results
         run: |
