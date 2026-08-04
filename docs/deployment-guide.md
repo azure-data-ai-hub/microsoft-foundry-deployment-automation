@@ -17,7 +17,8 @@
 infra/
 ├── main.bicep                          # Subscription-scoped orchestrator
 ├── modules/                            # Reusable Bicep modules
-├── dev.main.bicepparam                 # Dev (Basic Agent Setup)
+├── dev.main.bicepparam                 # Dev, minimal (Basic Agent Setup, Foundry-only)
+├── dev-standard.main.bicepparam        # Dev, full BYO-storage (Standard Agent Setup)
 ├── stg.main.bicepparam                 # Staging (Basic Agent Setup)
 ├── prod.main.bicepparam                # Production, eastus (Standard Agent Setup)
 └── prod-secondary-region.main.bicepparam  # Production, westus2 (multi-region example)
@@ -33,7 +34,7 @@ docs/                                   # This documentation set
 1. Clone the repository.
 2. Open `infra/dev.main.bicepparam` (and `stg`/`prod` as needed) and set **globally unique** names:
    - `namePrefix` (max 10 characters)
-   - If using Standard Agent Setup: `kvName`, `storageName`, `cosmosDBName`, `aiSearchName`
+   - If using Standard Agent Setup: use `infra/dev-standard.main.bicepparam` instead (or `stg`/`prod`, which are already Standard) and set `kvName`, `storageName`, `cosmosDBName`, `aiSearchName`
 3. Review/adjust `location`, `resourceGroupName`, `projects`, and `foundryModelDeployments` for each environment.
 4. Confirm target models are available in your target region:
    ```powershell
@@ -102,7 +103,7 @@ Check the `foundryEndpoint`, `foundryId`, and (if Standard Agent Setup) the Key 
 
 ### 4.1 Configure OIDC federation (no stored secrets)
 
-For each GitHub Environment (`DEV`, `STG`, `PROD`, and optionally `PROD-SECONDARY-REGION`):
+For each GitHub Environment (`DEV`, `STG`, `PROD`, and optionally `DEV-STANDARD`/`PROD-SECONDARY-REGION`):
 
 ```powershell
 az ad app create --display-name "microsoft-foundry-deployment-automation-<env>"
@@ -131,18 +132,24 @@ az role assignment create --assignee $appId --role "User Access Administrator" -
 
 ### 4.2 Create GitHub Environments
 
-In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `PROD-SECONDARY-REGION` if using the secondary-region example). For each:
+In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `DEV-STANDARD`/`PROD-SECONDARY-REGION` if using those variants). For each:
 
 - Add secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
 - Add variable `AZURE_LOCATION` (optional, defaults to `eastus`)
 - Add **required reviewers** on `STG`/`PROD` for approval gates
+
+> `DEV-STANDARD` can reuse the same federated credential/service principal as `DEV` (same
+> subscription, same permissions) — just create a second GitHub Environment named
+> `DEV-STANDARD` with an additional federated credential subject
+> (`repo:<owner>/<repo>:environment:DEV-STANDARD`) pointing at the same app registration, and
+> copy the same three secrets into it.
 
 ### 4.3 Pipeline stages
 
 | Stage | Trigger | Action |
 |---|---|---|
 | `validate` | PR to `main`, push to `main` | Ensures the resource group exists (`az group create`, idempotent), then `az deployment sub validate` across DEV/STG/PROD matrix |
-| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) |
+| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) — the environment name is lowercased and mapped directly to `infra/<name>.main.bicepparam` |
 
 This is intentionally a simple two-stage pipeline: `validate` gives fast feedback on every PR/push,
 and all actual deployments go through the explicit, auditable `deploy-manual` on-demand trigger

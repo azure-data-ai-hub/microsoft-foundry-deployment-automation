@@ -21,6 +21,7 @@ on:
         type: choice
         options:
           - DEV
+          - DEV-STANDARD
           - STG
           - PROD
           - PROD-SECONDARY-REGION

@@ -1,13 +1,8 @@
 using './main.bicep'
 
-// Minimal Basic Agent Setup for DEV: Foundry resource + Projects + model deployments +
-// Application Insights only. Microsoft manages Cosmos DB, AI Search, and Storage for
-// Agents automatically behind the scenes -- no Key Vault/Storage/Cosmos DB/AI Search
-// parameters needed here.
-//
-// Need the full BYO-storage (Standard Agent Setup) variant instead? Use
-// dev-standard.main.bicepparam, which has the additional Key Vault/Storage/Cosmos DB/
-// AI Search parameters required for that mode.
+// Standard Agent Setup for DEV: this repo deploys and owns the Key Vault, Storage,
+// Cosmos DB and AI Search backing resources for Agents (as opposed to dev.main.bicepparam,
+// which is the minimal Basic Agent Setup / Foundry-only variant).
 // See: https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/capability-hosts
 
 param namePrefix = 'dev-mfd'
@@ -32,11 +27,11 @@ param projects = [
 
 // This resource group must already exist before deployment (Bicep never creates it).
 // The CI/CD pipeline pre-creates it via `az group create` before invoking this template.
-param resourceGroupName = 'dev-mfd-foundry-rg'
+param resourceGroupName = 'dev-mfd-foundry-standard-rg'
 
 // Microsoft Foundry resource configuration (Microsoft Entra ID / AAD authentication only)
-param foundryName = 'devmfdfoundry001'
-param foundrySubdomain = 'devmfdfoundry001'
+param foundryName = 'devmfdstdfoundry001'
+param foundrySubdomain = 'devmfdstdfoundry001'
 
 // Model Deployments hosted on the Foundry resource
 param foundryModelDeployments = [
@@ -126,9 +121,19 @@ param foundryModelDeployments = [
 ]
 
 // Application Insights
-param appInsightsName = 'devmfdappins001'
+param appInsightsName = 'devmfdstdappins001'
 
 // Role Assignments - set to true if service principal has Owner/User Access Administrator role
 param deployRoleAssignments = true
 
-// agentSetupType defaults to 'Basic' in main.bicep -- no override needed here.
+// Standard Agent Setup (this repo deploys and owns the Key Vault, Cosmos DB, AI Search and
+// Storage backing resources). All names below must be globally unique across Azure.
+param agentSetupType = 'Standard'
+param kvName = 'devmfdkv001'
+param storageName = 'devmfdstor001'
+param cosmosDBName = 'devmfdcosmos001'
+// eastus is currently experiencing Cosmos DB capacity constraints (ServiceUnavailable on
+// account creation) for this subscription. Override to a nearby region with available
+// capacity; Cosmos DB connects to the Foundry project cross-region without issue.
+param cosmosDBLocation = 'eastus2'
+param aiSearchName = 'devmfdsearch001'
