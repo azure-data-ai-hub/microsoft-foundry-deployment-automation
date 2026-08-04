@@ -1,8 +1,5 @@
 # Microsoft Foundry - Automated Deployment with Bicep & GitHub Actions
 
-Infrastructure-as-code solution for deploying **Microsoft Foundry** (Azure AI Foundry) with production-grade security, RBAC, and CI/CD automation. Replicated from the pattern in
-[`vinod-soni-microsoft/azure-foundry-automation`](https://github.com/vinod-soni-microsoft/azure-foundry-automation) and adapted for this repository.
-
 ## Overview
 
 - **Bicep** for declarative infrastructure
