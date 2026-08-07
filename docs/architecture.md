@@ -6,13 +6,11 @@ This document describes the technical architecture of the Microsoft Foundry depl
 
 ## 2. Resource Model
 
-This framework deploys the **modern Microsoft Foundry resource model**:
+This framework deploys the **Microsoft Foundry resource model**:
 
 - **Microsoft Foundry resource** — a `Microsoft.CognitiveServices/accounts` resource (`kind: AIServices`) with `allowProjectManagement: true`.
 - **Foundry Projects** — child resources (`Microsoft.CognitiveServices/accounts/projects`) of the Foundry resource, one per business unit/team/workload (2-3 per environment in the reference parameter files, but the `projects` array supports any number).
 - **Model Deployments** — child resources (`Microsoft.CognitiveServices/accounts/deployments`) of the Foundry resource, config-driven via the `foundryModelDeployments` array parameter (see §5).
-
-This **replaces** the legacy Hub/Project `Microsoft.MachineLearningServices/workspaces` pattern used by older Azure AI Studio templates. There is no Hub resource in this framework.
 
 ```mermaid
 flowchart TD

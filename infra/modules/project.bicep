@@ -1,7 +1,6 @@
 // Microsoft Foundry Project Module
 // Deploys a Foundry Project as a child resource of a Microsoft Foundry resource
-// (Microsoft.CognitiveServices/accounts with allowProjectManagement: true). This replaces the
-// legacy Microsoft.MachineLearningServices/workspaces (kind: Project) model.
+// (Microsoft.CognitiveServices/accounts with allowProjectManagement: true).
 //
 // Supports both agent setup modes:
 // - Basic Agent Setup (default): Microsoft manages the backing Cosmos DB/AI Search/Storage

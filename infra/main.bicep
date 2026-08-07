@@ -173,8 +173,7 @@ module aiSearch 'modules/aisearch.bicep' = if (isStandardAgentSetup) {
 }
 
 // Deploy the Microsoft Foundry resource (Cognitive Services account with
-// allowProjectManagement: true). This is the modern Foundry resource model,
-// replacing the legacy Hub/Project ML workspace pattern.
+// allowProjectManagement: true).
 // Authentication is Microsoft Entra ID (AAD) only - local (API key) auth is disabled.
 // The account-level Agents capability host is deployed only for the Standard Agent Setup.
 module foundry 'modules/foundry.bicep' = {

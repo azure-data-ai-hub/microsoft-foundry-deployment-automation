@@ -1,7 +1,7 @@
 // Microsoft Foundry Resource Module
 // Deploys a Microsoft Foundry resource (Cognitive Services account, kind 'AIServices')
-// with `allowProjectManagement: true`, which is the current (non-Hub) Foundry resource
-// model. Foundry Projects are deployed as child resources via modules/project.bicep.
+// with `allowProjectManagement: true`. Foundry Projects are deployed as child resources
+// via modules/project.bicep.
 targetScope = 'resourceGroup'
 
 import { tagsType, modelDeploymentType } from 'types.bicep'
@@ -45,7 +45,7 @@ param enableAgentCapabilityHost bool = false
 
 // The Microsoft Foundry resource. Setting allowProjectManagement to true is what turns
 // this Cognitive Services account into a Foundry resource capable of hosting Projects
-// as child resources (replacing the older Hub/Project ML workspace model).
+// as child resources.
 resource foundry 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   name: foundryName
   location: location

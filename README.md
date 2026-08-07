@@ -9,7 +9,7 @@
 - **Simple two-stage pipeline**: automated `validate` on every PR/push, on-demand `deploy-manual` for actual deployments
 - **Multi-environment support** (dev → stg → prod) with GitHub Environment approval gates on manual deploys
 
-> **Resource model:** This deploys a **Microsoft Foundry resource** — a `Microsoft.CognitiveServices/accounts` resource (kind `AIServices`) with `allowProjectManagement: true` — with Foundry Projects as child resources (`Microsoft.CognitiveServices/accounts/projects`). This is the current Foundry resource model and does **not** use the legacy Hub/Project `Microsoft.MachineLearningServices/workspaces` pattern.
+> **Resource model:** This deploys a **Microsoft Foundry resource** — a `Microsoft.CognitiveServices/accounts` resource (kind `AIServices`) with `allowProjectManagement: true` — with Foundry Projects as child resources (`Microsoft.CognitiveServices/accounts/projects`).
 
 > **Authentication:** Local (API key) authentication is disabled on the Foundry resource (`disableLocalAuth: true`). Access is via **Microsoft Entra ID (AAD)** only, using RBAC role assignments on the resource's SystemAssigned managed identity.
 
