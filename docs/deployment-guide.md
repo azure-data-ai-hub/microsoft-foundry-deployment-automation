@@ -25,6 +25,11 @@ infra/
 azure.yaml                              # azd project config
 .github/workflows/deploy-foundry.yml    # CI/CD pipeline
 docs/                                   # This documentation set
+├── architecture.md
+├── deployment-guide.md                 # This document
+├── model-lifecycle-demo.md             # Scripted model add/delete walkthrough
+├── operational-handoff.md
+└── knowledge-transfer.md
 ```
 
 ## 3. Step-by-Step: First-Time Deployment
@@ -221,6 +226,9 @@ To delete a deployment manually instead:
 az cognitiveservices account deployment delete `
   --name <foundryName> --resource-group <rg> --deployment-name <deploymentName>
 ```
+
+For a scripted walkthrough of both the add and delete flows (useful for demos and
+onboarding), see [`model-lifecycle-demo.md`](model-lifecycle-demo.md).
 
 ## 6. Deploying a New Region
 

@@ -98,6 +98,7 @@ Detailed engagement documentation lives under `docs/`:
 | [`docs/deployment-guide.md`](docs/deployment-guide.md) | Step-by-step deployment instructions (CLI, azd, GitHub Actions), model onboarding, region onboarding, Apigee setup, troubleshooting |
 | [`docs/operational-handoff.md`](docs/operational-handoff.md) | Ownership model, monitoring/alerting, scaling, incident response, cost management, support escalation |
 | [`docs/knowledge-transfer.md`](docs/knowledge-transfer.md) | KT session agenda, success-criteria-to-demo mapping, deliverables checklist, FAQ |
+| [`docs/model-lifecycle-demo.md`](docs/model-lifecycle-demo.md) | Runbook for demoing model add/delete: scripted steps, talking points, expected output, recovery |
 
 ### Success Criteria & Final Deliverables
 
