@@ -37,13 +37,15 @@
 │   │   ├── types.bicep              # Shared user-defined types (tags, model deployments, projects)
 │   │   └── role-assignment.bicep    # RBAC role assignment (Key Vault, Storage, Cognitive Services, Cosmos DB, AI Search)
 │   ├── main.bicep                   # Main orchestrator (subscription scope)
-│   ├── dev.main.bicepparam          # Dev parameters (Basic Agent Setup)
+│   ├── dev.main.bicepparam          # Dev parameters, minimal (Basic Agent Setup, Foundry-only)
+│   ├── dev-standard.main.bicepparam # Dev parameters, full BYO-storage (Standard Agent Setup)
 │   ├── stg.main.bicepparam          # Staging parameters (Basic Agent Setup)
 │   ├── prod.main.bicepparam         # Production parameters, eastus (Standard Agent Setup example)
 │   └── prod-secondary-region.main.bicepparam  # Production parameters, westus2 (multi-region example)
 ├── docs
 │   ├── architecture.md              # Resource model, auth, multi-region, Apigee/Entra ID design
 │   ├── deployment-guide.md          # Step-by-step deployment instructions
+│   ├── model-lifecycle-demo.md      # Scripted model add/delete demo runbook
 │   ├── operational-handoff.md       # Ownership, monitoring, incident response, cost management
 │   └── knowledge-transfer.md        # KT session agenda, success-criteria demo mapping, FAQ
 ├── azure.yaml                        # Azure Developer CLI project config
@@ -66,7 +68,7 @@ To use **Standard** mode for an environment:
 2. Provide globally-unique `kvName`, `storageName`, `cosmosDBName`, and `aiSearchName` param values.
 3. Ensure `deployRoleAssignments = true` (Standard mode's capability hosts and container-scoped RBAC require the deploying identity to grant roles).
 
-See `infra/prod.main.bicepparam` for a working example, and `infra/dev.main.bicepparam` / `infra/stg.main.bicepparam` for the commented-out guidance on switching from Basic to Standard.
+See `infra/dev-standard.main.bicepparam` and `infra/prod.main.bicepparam` for working Standard Agent Setup examples, and `infra/stg.main.bicepparam` for the commented-out guidance on switching from Basic to Standard. `infra/dev.main.bicepparam` is deliberately minimal (Basic mode, no backing-resource parameters) so DEV can be deployed either way without editing parameters — pick `DEV` or `DEV-STANDARD` in the workflow.
 
 ## Multi-Region Deployment
 

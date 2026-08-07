@@ -130,6 +130,27 @@ New models are onboarded **without any Bicep changes** by adding an entry to the
 
 `main.bicep` and `modules/foundry.bicep` treat this as a generic array (`@batchSize(1)` loop over `Microsoft.CognitiveServices/accounts/deployments`), so onboarding a model is a **pure parameter file change** — no module code changes, no new pipeline logic. The GitHub Actions workflow's `validate` stage will pick up the new deployment automatically on the next PR.
 
+### 5.1 Lifecycle semantics
+
+The `name` field is the resource identity; `model` and `sku` are mutable properties of that
+resource. This determines what happens on redeploy:
+
+| Change in `.bicepparam` | ARM behaviour |
+|---|---|
+| Add a new array entry | New deployment created; existing deployments untouched |
+| Change `sku.capacity`, `sku.name`, `model.version`, or `model.name` (same `name`) | Existing deployment updated **in place** |
+| Remove an array entry | **Nothing happens** — the live deployment persists (see below) |
+
+Deployments run in ARM **Incremental** mode, which only creates and updates the resources present
+in the template and never deletes resources removed from it. `Complete` mode would delete them,
+but is not viable here: this is a *subscription-scoped* deployment, so Complete mode would delete
+every resource group in the subscription absent from the template.
+
+Deletion is therefore handled imperatively by the pipeline's **Reconcile model deployments** step,
+which diffs the compiled parameter file against `az cognitiveservices account deployment list`
+after every successful deploy. Orphans are reported as warnings by default and only deleted when
+the `pruneOrphanedModels` workflow input is explicitly set — see `docs/deployment-guide.md` §5.1.
+
 ## 6. Multi-Region Deployment
 
 The framework is **region-agnostic**: every resource name and the `location` parameter are supplied per `.bicepparam` file, and the Resource Group itself is parameterized (`resourceGroupName`). This means:
