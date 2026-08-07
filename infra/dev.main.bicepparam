@@ -78,6 +78,17 @@ param foundrySubdomain = 'devmfdfoundry001'
 // Model Deployments hosted on the Foundry resource
 param foundryModelDeployments = [
 {
+    name: 'gpt-4o'
+    model: {
+      name: 'gpt-4o'
+      version: '2024-05-13'
+    }
+    sku: {
+      name: 'GlobalStandard'
+      capacity: 10
+    }
+  }
+{
     // OpenAI's newest frontier model for the most complex professional work, with enhanced
     // reasoning and coding
     name: 'gpt-5.5'
