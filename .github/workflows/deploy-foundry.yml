@@ -89,10 +89,18 @@ jobs:
       - name: Show deployment summary
         shell: bash
         run: |
+          set -euo pipefail
           PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
-          MODEL_COUNT=$(grep -c "model: {" "$PARAM_FILE" || true)
-          PROJECT_COUNT=$(grep -c "description: '" "$PARAM_FILE" || true)
-          AGENT_SETUP=$(grep -oP "(?<=param agentSetupType = ')[^']+" "$PARAM_FILE" || echo 'Basic (default)')
+
+          # Read from the compiled parameter JSON rather than grepping the source, so the
+          # commented-out field reference blocks in the .bicepparam aren't counted.
+          P=$(az bicep build-params --file "$PARAM_FILE" --stdout | jq -r '.parametersJson')
+          MODEL_COUNT=$(echo "$P" | jq '.parameters.foundryModelDeployments.value | length // 0')
+          PROJECT_COUNT=$(echo "$P" | jq '.parameters.projects.value | length // 0')
+          AGENT_SETUP=$(echo "$P" | jq -r '.parameters.agentSetupType.value // "Basic (default)"')
+          APIGEE=$(echo "$P" | jq -r '.parameters.deployApigeeIntegration.value // false')
+          ROLES=$(echo "$P" | jq -r '.parameters.deployRoleAssignments.value // false')
+
           echo "::group::Deployment plan - ${{ matrix.environment }}"
           echo "Template:        ./infra/main.bicep"
           echo "Parameters file: $PARAM_FILE"
@@ -107,10 +115,10 @@ jobs:
             echo "  - Standard Agent Setup backing resources: Key Vault, Storage account, Cosmos DB account, AI Search service"
             echo "  - Account + project-level Agents capability hosts"
           fi
-          if grep -q "deployApigeeIntegration = true" "$PARAM_FILE"; then
+          if [ "$APIGEE" = "true" ]; then
             echo "  - Apigee integration: Entra ID App Registration + Service Principal"
           fi
-          echo "  - Role assignments: $(grep -oP "(?<=param deployRoleAssignments = )\w+" "$PARAM_FILE" || echo 'false')"
+          echo "  - Role assignments: $ROLES"
           echo "::endgroup::"
 
       - name: Validate Bicep template
@@ -181,11 +189,19 @@ jobs:
       - name: Show deployment summary
         shell: bash
         run: |
+          set -euo pipefail
           PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
-          MODEL_COUNT=$(grep -c "model: {" "$PARAM_FILE" || true)
-          PROJECT_COUNT=$(grep -c "description: '" "$PARAM_FILE" || true)
-          AGENT_SETUP=$(grep -oP "(?<=param agentSetupType = ')[^']+" "$PARAM_FILE" || echo 'Basic (default)')
+
+          # Read from the compiled parameter JSON rather than grepping the source, so the
+          # commented-out field reference blocks in the .bicepparam aren't counted.
+          P=$(az bicep build-params --file "$PARAM_FILE" --stdout | jq -r '.parametersJson')
+          MODEL_COUNT=$(echo "$P" | jq '.parameters.foundryModelDeployments.value | length // 0')
+          PROJECT_COUNT=$(echo "$P" | jq '.parameters.projects.value | length // 0')
+          AGENT_SETUP=$(echo "$P" | jq -r '.parameters.agentSetupType.value // "Basic (default)"')
+          APIGEE=$(echo "$P" | jq -r '.parameters.deployApigeeIntegration.value // false')
+          ROLES=$(echo "$P" | jq -r '.parameters.deployRoleAssignments.value // false')
           DEPLOYMENT_NAME="foundry-${{ github.event.inputs.environment }}-${{ github.run_number }}"
+
           echo "::group::Deployment plan - ${{ github.event.inputs.environment }}"
           echo "Deployment name: $DEPLOYMENT_NAME"
           echo "Template:        ./infra/main.bicep"
@@ -202,10 +218,10 @@ jobs:
             echo "  - Standard Agent Setup backing resources: Key Vault, Storage account, Cosmos DB account, AI Search service"
             echo "  - Account + project-level Agents capability hosts"
           fi
-          if grep -q "deployApigeeIntegration = true" "$PARAM_FILE"; then
+          if [ "$APIGEE" = "true" ]; then
             echo "  - Apigee integration: Entra ID App Registration + Service Principal"
           fi
-          echo "  - Role assignments: $(grep -oP "(?<=param deployRoleAssignments = )\w+" "$PARAM_FILE" || echo 'false')"
+          echo "  - Role assignments: $ROLES"
           echo ""
           if [ "${{ github.event.inputs.pruneOrphanedModels }}" = "true" ]; then
             echo "Orphaned model deployments: WILL BE DELETED (pruneOrphanedModels = true)"
