@@ -126,9 +126,65 @@ New models are onboarded **without any Bicep changes** by adding an entry to the
 }
 ```
 
+Each array entry becomes one `Microsoft.CognitiveServices/accounts/deployments` child resource. A
+condensed version of the reference below is also repeated as a commented-out block near the top of
+every `.bicepparam` file, so the common fields are available inline while editing.
+
+### 5.1 Field Reference
+
+Every field below is **required** — the shape is enforced at compile time by `modelDeploymentType`
+in `modules/types.bicep`, so a missing `sku.capacity` or a typo'd property fails `bicep build`
+rather than failing mid-deployment.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Deployment name used in inference API calls — it becomes part of the endpoint path. Any string. This is the **resource identity**: reusing an existing name updates that deployment in place rather than creating a new one (see §5.2). |
+| `model.name` | `string` | Model name from the Foundry / Azure OpenAI model catalog. Confirm availability in the target region first: `az cognitiveservices account list-models --name <foundryName> --resource-group <rg>`. |
+| `model.version` | `string` | Specific model version to pin (e.g. `'2024-05-13'`). The type requires this deliberately — relying on a Microsoft-assigned default lets the effective version drift over time. |
+| `sku.name` | `string` | Deployment/throughput type — see the table below. |
+| `sku.capacity` | `int` | Throughput quota. Units of 1,000 TPM (tokens-per-minute) for the Standard/Global/Batch SKUs, or PTUs for `ProvisionedManaged`. Draws from the subscription's **regional** model quota, so the sum across deployments in a region must fit within that quota or the deployment fails. |
+
+#### `sku.name` values
+
+| Value | Routing / behaviour |
+|---|---|
+| `GlobalStandard` | Global routing; highest availability and quota headroom. Preferred default. |
+| `Standard` | Regional routing. Required for some models (e.g. certain embeddings) that have no `GlobalStandard` offering. |
+| `GlobalBatch` | Global routing for the Batch API — asynchronous, lower cost, higher latency. |
+| `DataZoneStandard` | Data-zone-scoped routing: data residency within a geography rather than a single region. |
+| `DataZoneBatch` | Data-zone-scoped Batch API routing. |
+| `ProvisionedManaged` | Reserved throughput (PTUs) instead of pay-as-you-go TPM. `capacity` is interpreted as PTUs. |
+
+#### Fixed and unexposed properties
+
+`modules/foundry.bicep` hardcodes `properties.model.format` to `'OpenAI'`. Models published under a
+different format (e.g. Meta, Mistral, Cohere via the broader Foundry catalog) require extending that
+module before they can be deployed through this parameter.
+
+The following ARM properties exist on `Microsoft.CognitiveServices/accounts/deployments` but are
+**not** currently surfaced by `modules/types.bicep` + `modules/foundry.bicep`. Extend both to use
+them:
+
+| Property | Purpose |
+|---|---|
+| `properties.raiPolicyName` | Named Responsible AI content-filter policy to apply to the deployment. |
+| `properties.versionUpgradeOption` | `OnceNewDefaultVersionAvailable` \| `OnceCurrentVersionExpired` \| `NoAutoUpgrade`. Because this is unset, Azure applies its own default, which for many models allows the live version to be auto-upgraded independently of the parameter file. |
+| `properties.parentDeploymentName` | Parent deployment, for spillover/fallback chaining. |
+| `properties.spilloverDeploymentName` | Deployment to route to when this one is throttled. |
+| `properties.capacitySettings` | `designatedCapacity` and `priority` — used to express capacity intent across a spillover chain. |
+| `properties.model.publisher` / `.source` / `.sourceAccount` | Identify a non-catalog model source, e.g. a fine-tuned model or one from another account. Needed alongside a non-`OpenAI` `format`. |
+| `properties.scaleSettings` | `capacity` and `scaleType` (`Standard` \| `Manual`). Legacy for OpenAI deployments — superseded by `sku.capacity`. |
+| `sku.tier` | `Free` \| `Basic` \| `Standard` \| `Premium` \| `Enterprise`. Rarely set explicitly for OpenAI deployments. |
+| `sku.family` / `sku.size` | Hardware generation/size variants; not used by current OpenAI model SKUs. |
+| `tags` | Resource tags scoped to the individual deployment. The framework tags the Foundry account, not each deployment. |
+
 `main.bicep` and `modules/foundry.bicep` treat this as a generic array (`@batchSize(1)` loop over `Microsoft.CognitiveServices/accounts/deployments`), so onboarding a model is a **pure parameter file change** — no module code changes, no new pipeline logic. The GitHub Actions workflow's `validate` stage will pick up the new deployment automatically on the next PR.
 
-### 5.1 Lifecycle semantics
+`@batchSize(1)` makes the loop **serial** — deployments are provisioned one at a time. This is the
+main reason a deploy of 7-8 models takes ~90 seconds, and it means a mid-loop failure (typically
+quota exhaustion) leaves earlier entries applied and later ones untouched.
+
+### 5.2 Lifecycle semantics
 
 The `name` field is the resource identity; `model` and `sku` are mutable properties of that
 resource. This determines what happens on redeploy:
