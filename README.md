@@ -183,11 +183,22 @@ azd up
 `.github/workflows/deploy-foundry.yml` implements:
 
 1. **validate** — `az deployment sub validate` for DEV/STG/PROD on pull requests and pushes to `main` (`fail-fast: false` so all three environments are checked even if one fails)
-2. **deploy-manual** — on-demand deployment to a chosen environment (`DEV`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) via `workflow_dispatch`, with an optional `region` input to override the target Azure region without editing the `.bicepparam` file
+2. **deploy-manual** — on-demand deployment to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) via `workflow_dispatch`, with an optional `region` input to override the target Azure region without editing the `.bicepparam` file, and an optional `pruneOrphanedModels` input to delete model deployments that are no longer in the parameter file
 
 This is a deliberately simple pipeline: `validate` gives fast automatic feedback, and all real
 deployments go through the explicit `deploy-manual` trigger — there is no automatic push-to-deploy
 chain and no What-If stage.
+
+### Model Lifecycle
+
+Deployments run in ARM **Incremental** mode, so adding a model to `foundryModelDeployments` creates
+it, but *removing* one leaves the live deployment in place — it keeps consuming regional TPM quota
+indefinitely. After every successful deploy, the **Reconcile model deployments** step diffs the
+`.bicepparam` against `az cognitiveservices account deployment list` and reports any orphans as
+warnings plus a job-summary block. Re-run the workflow with **`pruneOrphanedModels`** checked to
+actually delete them — deletion is opt-in only, so a routine deploy can never drop a model by
+accident. Note that deleting a deployment is immediately breaking for callers of that deployment
+name. See `docs/deployment-guide.md` §5.1 for the recommended retirement sequence.
 
 The Bicep CLI is installed/upgraded via `az bicep install` / `az bicep upgrade` (no manual binary downloads), and a `concurrency` group prevents overlapping runs of this workflow on the same branch from racing each other.
 

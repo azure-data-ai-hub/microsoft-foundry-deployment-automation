@@ -150,7 +150,7 @@ In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `PROD-SE
 | Stage | Trigger | Action |
 |---|---|---|
 | `validate` | PR to `main`, push to `main` | Ensures the resource group exists (`az group create`, idempotent), then `az deployment sub validate` across DEV/STG/PROD matrix |
-| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`). The `.bicepparam` file is selected from the raw input (`infra/<lowercased-input>.main.bicepparam`), but the GitHub Environment used for secrets/OIDC is `DEV` for both `DEV` and `DEV-STANDARD` |
+| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`). The `.bicepparam` file is selected from the raw input (`infra/<lowercased-input>.main.bicepparam`), but the GitHub Environment used for secrets/OIDC is `DEV` for both `DEV` and `DEV-STANDARD`. After a successful deploy it reconciles model deployments (see §5.1) |
 
 This is intentionally a simple two-stage pipeline: `validate` gives fast feedback on every PR/push,
 and all actual deployments go through the explicit, auditable `deploy-manual` on-demand trigger
@@ -163,7 +163,7 @@ deploying — `main.bicep` itself never creates a resource group (see §3.1a).
 
 ### 4.4 Trigger a manual deployment
 
-GitHub UI: **Actions → Deploy Microsoft Foundry → Run workflow** → choose `environment` (and optionally `region` to override the default location, e.g. `westus2`).
+GitHub UI: **Actions → Deploy Microsoft Foundry → Run workflow** → choose `environment` (and optionally `region` to override the default location, e.g. `westus2`, and `pruneOrphanedModels` to delete de-referenced model deployments — see §5.1).
 
 CLI:
 ```powershell
@@ -176,6 +176,51 @@ gh workflow run deploy-foundry.yml -f environment=PROD -f region=westus2
 2. Add an entry to `foundryModelDeployments` in the target environment's `.bicepparam` file (see `docs/architecture.md` §5 for the schema).
 3. Open a PR — the `validate` stage confirms the change deploys cleanly (`az deployment sub validate`) across DEV/STG/PROD.
 4. Use `deploy-manual` (Actions → Run workflow) to roll out the change to the desired environment(s) in order (DEV → STG → PROD).
+
+Adding a model is purely additive: the deployment runs in ARM **Incremental** mode, so the new
+entry is created and every existing deployment is left untouched.
+
+### 5.1 Retiring a Model
+
+Removing an entry from `foundryModelDeployments` does **not** delete it from Azure. Incremental
+mode only creates and updates the resources present in the template — it never deletes resources
+that were removed from it. (ARM `Complete` mode would, but it is unusable here: this is a
+subscription-scoped deployment, so Complete mode would delete every resource in scope that isn't
+in the template, including resource groups.)
+
+The pipeline handles this with a **Reconcile model deployments** step that runs after every
+successful `deploy-manual` run. It compiles the `.bicepparam` to JSON (`az bicep build-params`),
+diffs the desired deployment names against `az cognitiveservices account deployment list`, and:
+
+- **By default** (`pruneOrphanedModels` unchecked) it only *reports* orphans — one
+  `::warning::` per orphan plus a job-summary block with the exact `az` delete command. Nothing
+  is deleted, so a routine deploy can never remove a model by accident.
+- **When `pruneOrphanedModels` is checked** it deletes each orphan with
+  `az cognitiveservices account deployment delete`. Because this is a `workflow_dispatch` input,
+  deletion is always an explicit, auditable, human-triggered decision — and on `STG`/`PROD` it
+  still passes through the GitHub Environment approval gate.
+
+Deleting a model deployment is **immediately breaking**: any application calling that deployment
+name starts receiving `404 DeploymentNotFound` as soon as the delete completes. There is no
+grace period and no undo — recreating it is a new deployment that must re-acquire quota.
+Recommended retirement sequence:
+
+1. Repoint application code/config to the replacement deployment name and release it.
+2. Confirm zero traffic to the old deployment (Azure Monitor metrics on the Foundry account,
+   split by deployment name).
+3. Remove the entry from the `.bicepparam` file and merge.
+4. Run `deploy-manual` normally — confirm the warning lists exactly the deployment(s) you expect.
+5. Re-run `deploy-manual` with `pruneOrphanedModels` checked to delete them.
+
+Orphans are not free: each one continues to hold its `sku.capacity` allocation against the
+subscription's regional TPM quota, which can cause later deployments to fail with quota errors
+even though the model is unused. Reconcile regularly rather than letting drift accumulate.
+
+To delete a deployment manually instead:
+```powershell
+az cognitiveservices account deployment delete `
+  --name <foundryName> --resource-group <rg> --deployment-name <deploymentName>
+```
 
 ## 6. Deploying a New Region
 

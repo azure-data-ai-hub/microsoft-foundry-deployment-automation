@@ -29,6 +29,11 @@ on:
         description: 'Optional Azure region override (e.g. westus2). Leave blank to use the region in the .bicepparam file / AZURE_LOCATION.'
         required: false
         type: string
+      pruneOrphanedModels:
+        description: 'DESTRUCTIVE: delete model deployments that exist in Azure but are no longer in the .bicepparam file. Leave unchecked to only report them.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -201,6 +206,12 @@ jobs:
             echo "  - Apigee integration: Entra ID App Registration + Service Principal"
           fi
           echo "  - Role assignments: $(grep -oP "(?<=param deployRoleAssignments = )\w+" "$PARAM_FILE" || echo 'false')"
+          echo ""
+          if [ "${{ github.event.inputs.pruneOrphanedModels }}" = "true" ]; then
+            echo "Orphaned model deployments: WILL BE DELETED (pruneOrphanedModels = true)"
+          else
+            echo "Orphaned model deployments: report only (set pruneOrphanedModels to delete them)"
+          fi
           echo "::endgroup::"
 
       - name: Deploy to Azure
@@ -214,6 +225,71 @@ jobs:
           parameters: ./infra/${{ env.ENV_LOWER }}.main.bicepparam ${{ env.PARAM_OVERRIDES }}
           deploymentName: 'foundry-${{ github.event.inputs.environment }}-${{ github.run_number }}'
           failOnStdErr: false
+
+      - name: Reconcile model deployments
+        shell: bash
+        if: always() && steps.deploy.outcome == 'success'
+        run: |
+          set -euo pipefail
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          PRUNE="${{ github.event.inputs.pruneOrphanedModels }}"
+
+          # Compile the .bicepparam to JSON so the desired state is read from resolved
+          # parameter values rather than by grepping source (which would also match the
+          # commented-out field reference block). --stdout wraps the params file content
+          # in a "parametersJson" string field, hence the extra jq unwrap below.
+          PARAM_JSON=$(az bicep build-params --file "$PARAM_FILE" --stdout | jq -r '.parametersJson')
+          FOUNDRY_NAME=$(echo "$PARAM_JSON" | jq -r '.parameters.foundryName.value')
+          DESIRED=$(echo "$PARAM_JSON" | jq -r '.parameters.foundryModelDeployments.value[]?.name' | sort)
+
+          ACTUAL=$(az cognitiveservices account deployment list \
+            --name "$FOUNDRY_NAME" \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --query "[].name" -o tsv | sort)
+
+          # Orphans = live in Azure but absent from the parameter file. Incremental
+          # deployment mode never removes these, so they linger and keep consuming
+          # the subscription's regional TPM quota until explicitly deleted.
+          ORPHANS=$(comm -13 <(echo "$DESIRED") <(echo "$ACTUAL") | grep -v '^$' || true)
+
+          echo "::group::Model deployment reconciliation - $FOUNDRY_NAME"
+          echo "Desired (from $PARAM_FILE):"
+          echo "$DESIRED" | sed 's/^/  - /'
+          echo ""
+          echo "Actual (live in Azure):"
+          echo "$ACTUAL" | sed 's/^/  - /'
+          echo "::endgroup::"
+
+          if [ -z "$ORPHANS" ]; then
+            echo "No orphaned model deployments - Azure matches the parameter file."
+            echo "### Model deployments in sync :white_check_mark:" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          ORPHAN_COUNT=$(echo "$ORPHANS" | wc -l | tr -d ' ')
+
+          if [ "$PRUNE" = "true" ]; then
+            echo "### Pruned $ORPHAN_COUNT orphaned model deployment(s) :wastebasket:" >> "$GITHUB_STEP_SUMMARY"
+            while read -r NAME; do
+              echo "Deleting orphaned model deployment '$NAME'..."
+              az cognitiveservices account deployment delete \
+                --name "$FOUNDRY_NAME" \
+                --resource-group "${{ env.RESOURCE_GROUP }}" \
+                --deployment-name "$NAME" \
+                --only-show-errors
+              echo "Deleted '$NAME'."
+              echo "- \`$NAME\` deleted" >> "$GITHUB_STEP_SUMMARY"
+            done <<< "$ORPHANS"
+          else
+            echo "### $ORPHAN_COUNT orphaned model deployment(s) detected :warning:" >> "$GITHUB_STEP_SUMMARY"
+            echo "These exist in Azure but are no longer in \`$PARAM_FILE\`. They still consume regional TPM quota." >> "$GITHUB_STEP_SUMMARY"
+            echo "Re-run this workflow with **pruneOrphanedModels** checked to delete them, or remove them manually." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            while read -r NAME; do
+              echo "::warning::Orphaned model deployment '$NAME' exists in Azure but is not in $PARAM_FILE. Delete with: az cognitiveservices account deployment delete --name $FOUNDRY_NAME --resource-group ${{ env.RESOURCE_GROUP }} --deployment-name $NAME"
+              echo "- \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+            done <<< "$ORPHANS"
+          fi
 
       - name: List deployed resources
         shell: bash
