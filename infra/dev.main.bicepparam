@@ -150,6 +150,34 @@ param foundryModelDeployments = [
     }
   }
   {
+    // Batch (asynchronous) deployment of gpt-5.4. Uses the Batch API for high-volume,
+    // latency-tolerant workloads at lower cost than the synchronous GlobalStandard SKU.
+    // Deployed alongside 'gpt-5.4' above as a separate deployment name -- the same model
+    // cannot serve both synchronous and batch traffic from one deployment.
+    name: 'gpt-5.4-batch'
+    model: {
+      name: 'gpt-5.4'
+      version: '2026-03-05'
+    }
+    sku: {
+      name: 'GlobalBatch'
+      capacity: 10
+    }
+  }
+  {
+    // Model router: a single endpoint that automatically selects the most suitable
+    // underlying model per request, balancing quality against cost.
+    name: 'model-router'
+    model: {
+      name: 'model-router'
+      version: '2025-11-18'
+    }
+    sku: {
+      name: 'GlobalStandard'
+      capacity: 10
+    }
+  }
+  {
     name: 'text-embedding-ada-002'
     model: {
       name: 'text-embedding-ada-002'
