@@ -42,6 +42,8 @@
 │   ├── stg.main.bicepparam          # Staging parameters (Basic Agent Setup)
 │   ├── prod.main.bicepparam         # Production parameters, eastus (Standard Agent Setup example)
 │   └── prod-secondary-region.main.bicepparam  # Production parameters, westus2 (multi-region example)
+├── scripts
+│   └── validate-inference.py        # Post-deployment inference smoke test (calls every deployed model)
 ├── docs
 │   ├── architecture.md              # Resource model, auth, multi-region, Apigee/Entra ID design
 │   ├── deployment-guide.md          # Step-by-step deployment instructions
@@ -186,7 +188,7 @@ azd up
 `.github/workflows/deploy-foundry.yml` implements:
 
 1. **validate** — `az deployment sub validate` for DEV and DEV-STANDARD on pull requests and pushes to `main` (`fail-fast: false` so both are checked even if one fails). This repository targets the DEV subscription only; see the comment on the `validate` job in `deploy-foundry.yml` for how to add STG/PROD once their federated credentials exist
-2. **deploy-manual** — on-demand deployment to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) via `workflow_dispatch`, with an optional `region` input to override the target Azure region without editing the `.bicepparam` file, and an optional `pruneOrphanedModels` input to delete model deployments that are no longer in the parameter file
+2. **deploy-manual** — on-demand deployment to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`) via `workflow_dispatch`, with an optional `region` input to override the target Azure region without editing the `.bicepparam` file, an optional `pruneOrphanedModels` input to delete model deployments that are no longer in the parameter file, and a `runInferenceValidation` input (default on) that probes every deployed model after the deploy
 
 This is a deliberately simple pipeline: `validate` gives fast automatic feedback, and all real
 deployments go through the explicit `deploy-manual` trigger — there is no automatic push-to-deploy
@@ -202,6 +204,25 @@ warnings plus a job-summary block. Re-run the workflow with **`pruneOrphanedMode
 actually delete them — deletion is opt-in only, so a routine deploy can never drop a model by
 accident. Note that deleting a deployment is immediately breaking for callers of that deployment
 name. See `docs/deployment-guide.md` §5.1 for the recommended retirement sequence.
+
+### Inference Validation
+
+`provisioningState = Succeeded` only means ARM created the deployment resource — it does not mean
+the model can serve a request. After every successful deploy, the **Validate model inference** step
+runs `scripts/validate-inference.py`, which sends a real chat or embeddings request to every
+deployment on the account and fails the run if any model does not respond. `GlobalBatch` deployments
+are skipped, since they serve the asynchronous Batch API and reject synchronous calls.
+
+The script is stdlib-only Python (no `pip install`) and runs locally too:
+
+```bash
+python3 scripts/validate-inference.py --foundry-name devmfdfoundry001 --resource-group dev-mfd-foundry-rg
+```
+
+Inference is a **data-plane** action, so Contributor/Owner do not grant it. The pipeline resolves its
+own object ID and passes it as `inferenceValidationPrincipalId`; `main.bicep` then assigns
+**Cognitive Services OpenAI User** on the Foundry account. Set `runInferenceValidation` to `false` to
+skip the step. See `docs/deployment-guide.md` §4.3a.
 
 The Bicep CLI is installed/upgraded via `az bicep install` / `az bicep upgrade` (no manual binary downloads), and a `concurrency` group prevents overlapping runs of this workflow on the same branch from racing each other.
 

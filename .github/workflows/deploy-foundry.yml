@@ -34,6 +34,11 @@ on:
         required: false
         type: boolean
         default: false
+      runInferenceValidation:
+        description: 'Send a live probe request to every deployed model after deployment and fail the run if any model does not serve traffic.'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   id-token: write
@@ -186,6 +191,29 @@ jobs:
             echo "PARAM_OVERRIDES=" >> $GITHUB_ENV
           fi
 
+      - name: Resolve inference validation principal
+        shell: bash
+        if: github.event.inputs.runInferenceValidation != 'false'
+        run: |
+          set -euo pipefail
+          # main.bicep needs the deploy identity's *object* ID to grant it the data-plane
+          # Cognitive Services OpenAI User role. AZURE_CLIENT_ID is the app ID, and resolving
+          # app -> object via 'az ad sp show' needs Microsoft Graph permissions the deploy
+          # identity is not guaranteed to hold. Reading an existing role assignment stays on
+          # ARM, which the identity can already read, and returns the object ID directly.
+          OBJECT_ID=$(az role assignment list \
+            --assignee "${{ secrets.AZURE_CLIENT_ID }}" \
+            --scope "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --query "[0].principalId" -o tsv 2>/dev/null || true)
+
+          if [ -z "$OBJECT_ID" ]; then
+            echo "::warning::Could not resolve the deploy identity's object ID; skipping the inference role grant. If inference validation fails with HTTP 401/403, assign 'Cognitive Services OpenAI User' to the deploy identity manually."
+            exit 0
+          fi
+
+          echo "Deploy identity object ID: $OBJECT_ID"
+          echo "PARAM_OVERRIDES=${{ env.PARAM_OVERRIDES }} inferenceValidationPrincipalId=$OBJECT_ID" >> $GITHUB_ENV
+
       - name: Ensure resource group exists
         shell: bash
         run: |
@@ -316,6 +344,23 @@ jobs:
               echo "- \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
             done <<< "$ORPHANS"
           fi
+
+      - name: Validate model inference
+        shell: bash
+        if: always() && steps.deploy.outcome == 'success' && github.event.inputs.runInferenceValidation != 'false'
+        run: |
+          set -euo pipefail
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          PARAM_JSON=$(az bicep build-params --file "$PARAM_FILE" --stdout | jq -r '.parametersJson')
+          FOUNDRY_NAME=$(echo "$PARAM_JSON" | jq -r '.parameters.foundryName.value')
+
+          # A successful ARM deployment only proves the deployment resource reached
+          # provisioningState=Succeeded. It does not prove the model actually serves
+          # traffic - capacity can be unavailable and AAD data-plane role assignments
+          # can still be propagating. This sends a real request to every deployment.
+          python3 ./scripts/validate-inference.py \
+            --foundry-name "$FOUNDRY_NAME" \
+            --resource-group "${{ env.RESOURCE_GROUP }}"
 
       - name: List deployed resources
         shell: bash

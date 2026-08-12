@@ -155,7 +155,7 @@ In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `PROD-SE
 | Stage | Trigger | Action |
 |---|---|---|
 | `validate` | PR to `main`, push to `main` | Ensures the resource group exists (`az group create`, idempotent), then `az deployment sub validate` across the DEV and DEV-STANDARD matrix entries (both authenticate via the `DEV` GitHub Environment) |
-| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`). The `.bicepparam` file is selected from the raw input (`infra/<lowercased-input>.main.bicepparam`), but the GitHub Environment used for secrets/OIDC is `DEV` for both `DEV` and `DEV-STANDARD`. After a successful deploy it reconciles model deployments (see §5.1) |
+| `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`). The `.bicepparam` file is selected from the raw input (`infra/<lowercased-input>.main.bicepparam`), but the GitHub Environment used for secrets/OIDC is `DEV` for both `DEV` and `DEV-STANDARD`. After a successful deploy it reconciles model deployments (see §5.1), then validates that every deployed model actually serves inference (see §4.3a) |
 
 This is intentionally a simple two-stage pipeline: `validate` gives fast feedback on every PR/push,
 and all actual deployments go through the explicit, auditable `deploy-manual` on-demand trigger
@@ -165,6 +165,59 @@ push-to-deploy chain and no What-If stage.
 Every job resolves `resourceGroupName` and `location` directly from the target environment's
 `.bicepparam` file and runs `az group create --name <rg> --location <loc>` before validating or
 deploying — `main.bicep` itself never creates a resource group (see §3.1a).
+
+### 4.3a Post-deployment inference validation
+
+A successful ARM deployment only proves each model deployment resource reached
+`provisioningState = Succeeded`. It does not prove the model actually serves traffic — regional
+capacity can be unavailable, and AAD data-plane role assignments may still be propagating.
+
+After a successful deploy, `deploy-manual` runs `scripts/validate-inference.py`, which sends a real
+request to every deployment on the account and fails the run if any model does not respond. It is a
+stdlib-only Python script, so the runner needs no `pip install`.
+
+| Deployment kind | Probe |
+|---|---|
+| Chat / completion models | `POST /openai/deployments/<name>/chat/completions` |
+| Embedding models | `POST /openai/deployments/<name>/embeddings` |
+| `GlobalBatch` SKU | Skipped — serves the asynchronous Batch API only, so a synchronous call always fails |
+| Anything else | Skipped |
+
+Set the **runInferenceValidation** dispatch input to `false` to skip the step.
+
+Two behaviours worth knowing before you read a failure:
+
+- **Batch deployments still advertise `chatCompletion: true`** in their capability flags, so the
+  script dispatches on the SKU *before* the capabilities. Trusting the flags alone would produce a
+  guaranteed false failure.
+- **Reasoning models spend their token budget on hidden reasoning tokens.** With too small a budget
+  they return empty content and `finish_reason=length`, which looks like a failure but is not. The
+  default `--max-completion-tokens 256` leaves enough headroom; the failure message says so if you
+  lower it.
+
+Run it locally against any environment:
+
+```bash
+python3 scripts/validate-inference.py \
+  --foundry-name devmfdfoundry001 \
+  --resource-group dev-mfd-foundry-rg
+```
+
+Exit codes: `0` all passed, `1` at least one model failed, `2` could not run at all (bad account,
+no token, unknown deployment name). Add `--deployment <name>` (repeatable) to probe a subset.
+
+**Required permission:** inference is a *data-plane* action. The control-plane roles a deploy
+identity normally holds — Contributor, Owner, User Access Administrator — carry no `dataActions` and
+therefore do **not** grant it. The caller needs **Cognitive Services OpenAI User** on the Foundry
+account. The pipeline handles this automatically: it resolves its own object ID and passes it as
+`inferenceValidationPrincipalId`, and `main.bicep` creates the assignment. To grant it by hand:
+
+```bash
+az role assignment create \
+  --assignee <objectId> \
+  --role "Cognitive Services OpenAI User" \
+  --scope $(az cognitiveservices account show -n <foundry> -g <rg> --query id -o tsv)
+```
 
 ### 4.4 Trigger a manual deployment
 
@@ -180,7 +233,7 @@ gh workflow run deploy-foundry.yml -f environment=PROD -f region=westus2
 1. Confirm availability: `az cognitiveservices model list --location <region>`.
 2. Add an entry to `foundryModelDeployments` in the target environment's `.bicepparam` file (see `docs/architecture.md` §5 for the schema).
 3. Open a PR — the `validate` stage confirms the change deploys cleanly (`az deployment sub validate`) for DEV and DEV-STANDARD. Changes to `stg`/`prod` parameter files are **not** validated automatically (see §4.3).
-4. Use `deploy-manual` (Actions → Run workflow) to roll out the change to the desired environment(s) in order (DEV → STG → PROD).
+4. Use `deploy-manual` (Actions → Run workflow) to roll out the change to the desired environment(s) in order (DEV → STG → PROD). The run ends by probing every deployed model, so a model that provisions but cannot serve traffic fails the run rather than passing silently (see §4.3a).
 
 Adding a model is purely additive: the deployment runs in ARM **Incremental** mode, so the new
 entry is created and every existing deployment is left untouched.
@@ -263,3 +316,7 @@ onboarding), see [`model-lifecycle-demo.md`](model-lifecycle-demo.md).
 | Model deployment fails with capacity/quota error | Check regional quota (`az cognitiveservices usage list --location <region>`) and request a quota increase if needed. Also check for orphaned deployments still holding quota (see next row). |
 | Model removed from `.bicepparam` still exists in Azure | Expected — ARM Incremental mode never deletes de-referenced resources. The pipeline's **Reconcile model deployments** step reports these as warnings; re-run `deploy-manual` with `pruneOrphanedModels` checked to delete them. See §5.1. |
 | `validate` job fails at "Azure Login (OIDC)" with `AADSTS700213` for an environment | That GitHub Environment has no matching federated identity credential. The `validate` matrix is intentionally limited to environments that do (see §4.3) — don't add an entry to `matrix.include` until the credential exists, or the gated build fails on authentication rather than on any template problem. Note the failure is unrelated to the Bicep: check whether the `Validate Bicep - DEV` job passed to confirm. |
+| Inference validation fails with HTTP 401/403 for every model | The calling identity has no data-plane role. Inference is a `dataAction`, and Contributor/Owner/User Access Administrator grant none — control-plane access is not enough. Assign **Cognitive Services OpenAI User** on the Foundry account (see §4.3a). In the pipeline this is automatic; if the "Resolve inference validation principal" step logged a warning, it could not determine the object ID and skipped the grant. |
+| Inference validation reports `empty content (finish_reason=length)` | A reasoning model consumed the whole token budget on hidden reasoning tokens before emitting any text. Raise `--max-completion-tokens` (default 256). Not an outage. |
+| Inference validation fails only for a `GlobalBatch` deployment | It should be skipped, not failed — batch deployments serve the asynchronous Batch API and reject synchronous calls. If it is being probed, the deployment's SKU is not reporting as `GlobalBatch`; check `az cognitiveservices account deployment show --deployment-name <name>`. |
+| Inference validation fails for one model while others pass | Model-specific: check regional capacity for that SKU and confirm the deployment's `provisioningState` is `Succeeded`. Re-run with `--deployment <name>` to iterate quickly without probing the whole account. |

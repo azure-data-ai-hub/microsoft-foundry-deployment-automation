@@ -81,6 +81,13 @@ param deployApigeeIntegration bool = false
 @description('Display name for the Apigee gateway Entra ID App Registration (only used when deployApigeeIntegration is true)')
 param apigeeGatewayAppDisplayName string = '${namePrefix}-apigee-gateway'
 
+@description('''Object ID (not app ID) of a principal to grant the Cognitive Services OpenAI User role on the
+Foundry resource, so it can call model inference endpoints. Intended for the CI/CD identity that runs
+scripts/validate-inference.py after deployment: inference is a data-plane action, and the control-plane
+roles a deployment identity normally holds (Contributor, Owner, User Access Administrator) carry no
+dataActions, so they do not grant it. Leave empty to skip the assignment.''')
+param inferenceValidationPrincipalId string = ''
+
 // Variables
 var mergedTags = union(
   {
@@ -239,6 +246,20 @@ module apigeeGatewayRoleAssignment 'modules/role-assignment.bicep' = if (deployA
   scope: resourceGroup(resourceGroupName)
   params: {
     principalId: apigeeGatewayIdentity.?outputs.?servicePrincipalId ?? ''
+    roleDefinitionId: cognitiveServicesOpenAIUserRoleId
+    principalType: 'ServicePrincipal'
+    resourceId: foundry.outputs.id
+  }
+}
+
+// Grant the CI/CD identity the Cognitive Services OpenAI User role on the Foundry resource so the
+// post-deployment inference validation (scripts/validate-inference.py) can call the model endpoints.
+// Creating this assignment requires the deploying principal to hold Owner or User Access Administrator.
+module inferenceValidationRoleAssignment 'modules/role-assignment.bicep' = if (!empty(inferenceValidationPrincipalId)) {
+  name: 'assign-inference-role-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
+  params: {
+    principalId: inferenceValidationPrincipalId
     roleDefinitionId: cognitiveServicesOpenAIUserRoleId
     principalType: 'ServicePrincipal'
     resourceId: foundry.outputs.id
