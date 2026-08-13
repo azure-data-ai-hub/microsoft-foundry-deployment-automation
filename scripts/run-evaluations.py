@@ -36,7 +36,9 @@ Examples:
 Exit codes:
     0  every evaluated model met the pass threshold
     1  at least one model fell below the threshold, or a run errored
-    2  the script could not run (login, endpoint lookup, bad dataset)
+    2  the run could not produce a verdict: login, endpoint lookup, bad dataset,
+       or a deployment that stayed rate limited (a capacity fault, not a model
+       quality failure)
 """
 
 from __future__ import annotations
@@ -58,6 +60,11 @@ TOKEN_SCOPE = "https://cognitiveservices.azure.com"
 BATCH_SKU_MARKER = "batch"
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
+
+# Rate limiting is a capacity fault, not a wrong answer. It gets its own status
+# so it exits 2 (infrastructure) rather than 1 (model quality) and nobody goes
+# hunting a model regression that does not exist.
+BLOCKED = "BLOCKED"
 
 # Terminal states reported by the Evals API for a run.
 TERMINAL_STATES = ("completed", "failed", "canceled", "cancelled")
@@ -428,11 +435,18 @@ def evaluate_deployment(base, token, eval_id, deployment, content, plan, args):
         result, retry_reason = run_once(base, token, eval_id, deployment, content, plan, args, started)
         if not retry_reason or attempt > args.max_run_retries:
             if retry_reason:
-                # Out of retries: report the real cause rather than a quality verdict.
+                # Out of retries: report the real cause, and mark it BLOCKED so
+                # the exit code says "capacity" rather than "bad model".
+                result.status = BLOCKED
                 result.detail = "{} after {} attempt(s)".format(retry_reason, attempt)
             return result
-        print("     {} - retrying run ({}/{})".format(retry_reason, attempt, args.max_run_retries))
-        time.sleep(args.retry_delay)
+        # TPM quota refills on a rolling per-minute window, so back off further
+        # each attempt: a flat short delay can land inside the same exhausted
+        # window and burn a retry for nothing.
+        delay = args.retry_delay * attempt
+        print("     {} - retrying run in {}s ({}/{})".format(
+            retry_reason, delay, attempt, args.max_run_retries))
+        time.sleep(delay)
         attempt += 1
 
 
@@ -677,6 +691,7 @@ def main():
     passed = [r for r in results if r.status == PASS]
     failed = [r for r in results if r.status == FAIL]
     skipped = [r for r in results if r.status == SKIP]
+    blocked = [r for r in results if r.status == BLOCKED]
 
     print("")
     print("{:<26} {:<7} {:<28} {}".format("DEPLOYMENT", "RESULT", "DATASET", "DETAIL"))
@@ -685,11 +700,13 @@ def main():
         print("{:<26} {:<7} {:<28} {}".format(
             r.name, r.status, os.path.basename(r.dataset) if r.dataset else "-", r.detail))
     print("-" * 110)
-    print("{} passed, {} failed, {} skipped".format(len(passed), len(failed), len(skipped)))
+    print("{} passed, {} failed, {} blocked, {} skipped".format(
+        len(passed), len(failed), len(blocked), len(skipped)))
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
-        icon = {PASS: ":white_check_mark:", FAIL: ":x:", SKIP: ":fast_forward:"}
+        icon = {PASS: ":white_check_mark:", FAIL: ":x:", SKIP: ":fast_forward:",
+                BLOCKED: ":warning:"}
         with open(summary_path, "a", encoding="utf-8") as fh:
             fh.write("### Model evaluation - `{}`\n\n".format(args.foundry_name))
             fh.write("Each deployment is graded against its own dataset, because models "
@@ -700,13 +717,25 @@ def main():
                     r.name, icon.get(r.status, r.status),
                     "`{}`".format(os.path.basename(r.dataset)) if r.dataset else "-",
                     r.detail))
-            fh.write("\n**{} passed, {} failed, {} skipped**\n".format(
-                len(passed), len(failed), len(skipped)))
+            fh.write("\n**{} passed, {} failed, {} blocked, {} skipped**\n".format(
+                len(passed), len(failed), len(blocked), len(skipped)))
+            if blocked:
+                fh.write("\n> Blocked deployments were rate limited (HTTP 429), not wrong. "
+                         "That is a TPM quota shortfall on the deployment, so raise its "
+                         "capacity in the `.bicepparam` rather than editing the dataset.\n")
 
     if os.environ.get("GITHUB_ACTIONS") == "true":
         for r in failed:
             print("::error::Model evaluation failed for '{}': {}".format(r.name, r.detail))
+        for r in blocked:
+            print("::error::Model evaluation blocked for '{}': {} "
+                  "(capacity problem, not a model quality failure)".format(r.name, r.detail))
 
+    # Distinct exit codes: 1 means the models answered wrongly, 2 means the run
+    # could not produce a verdict. Collapsing them would let a quota shortfall
+    # masquerade as a quality regression.
+    if blocked:
+        return 2
     return 1 if failed else 0
 
 

@@ -290,8 +290,12 @@ fail the pipeline.
 
 **Rate limiting.** A throttled item returns no content, which naive grading scores as a wrong
 answer — reporting a capacity problem as a quality regression. HTTP 429 is therefore detected in the
-run's `output_items`, retried (`--max-run-retries`, default 2), and if it persists reported
-explicitly as a TPM quota problem rather than a model failure.
+run's `output_items` and the run retried with escalating backoff (`--max-run-retries`, default 2;
+`--retry-delay`, default 30s, multiplied by attempt number because TPM quota refills on a rolling
+per-minute window). If it still persists, the deployment is reported as `BLOCKED` and the script
+exits **2**, not 1 — a quota shortfall is an infrastructure fault, and giving it the same exit code
+as wrong answers would send someone hunting a model regression that does not exist. The fix is to
+raise that deployment's `sku.capacity` in the environment's `.bicepparam`.
 
 **Token budget.** Reasoning models spend hidden tokens before emitting text, so a small budget
 yields empty answers. `--max-completions-tokens` (default 2000) sets the per-item budget. Note the
@@ -306,19 +310,31 @@ python3 scripts/run-evaluations.py \
   --resource-group dev-mfd-foundry-rg
 ```
 
-Exit codes match `validate-inference.py`: `0` all passed, `1` at least one deployment fell below the
-threshold, `2` could not run at all. Useful flags: `--deployment <name>` (repeatable),
+Exit codes: `0` all passed, `1` at least one deployment answered below its threshold, `2` could not
+produce a verdict — either the script could not start (bad account, bad dataset, no permission) or a
+deployment stayed rate limited. Useful flags: `--deployment <name>` (repeatable),
 `--pass-threshold`, `--similarity-threshold`, `--similarity-metric` (`fuzzy_match`, `bleu`,
 `rouge_l`, `meteor`), `--dataset`, `--default-dataset`, `--manifest`, `--max-completions-tokens`,
-`--max-run-retries`, `--keep-eval`.
+`--max-run-retries`, `--retry-delay`, `--keep-eval`.
 
 **Cleanup.** Evaluation definitions are created per distinct grading configuration and deleted in a
 `finally` block, so cancelled runs still clean up. `--keep-eval` retains them for inspection in the
 Azure AI Foundry portal.
 
-**Required permission:** the same **Cognitive Services OpenAI User** data-plane role described in
-§4.3a. Because that role is granted by `main.bicep` during a deploy, deploy an environment at least
-once before evaluating it.
+**Required permission:** **Cognitive Services User** on the Foundry account. This is *not* the same
+role inference validation needs, and the difference is easy to miss: `Cognitive Services OpenAI User`
+enumerates specific OpenAI `dataActions` (chat completions, embeddings, responses, …) and the
+evaluations API is not among them, so with only that role inference passes while evaluation creation
+fails with `HTTP 401: Principal does not have access to API/Operation`. `main.bicep` assigns both
+roles to `inferenceValidationPrincipalId`, so deploy an environment at least once before evaluating
+it. To grant it manually:
+
+```bash
+az role assignment create \
+  --assignee-object-id <object-id> --assignee-principal-type ServicePrincipal \
+  --role "Cognitive Services User" \
+  --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<account>
+```
 
 **Writing dataset items.** Each `.jsonl` holds one JSON object per line with `question`, `answer`,
 and `category`; lines beginning `//` are treated as comments. Prefer questions whose correct answer
@@ -432,6 +448,8 @@ onboarding), see [`model-lifecycle-demo.md`](model-lifecycle-demo.md).
 | Inference validation reports `empty content (finish_reason=length)` | A reasoning model consumed the whole token budget on hidden reasoning tokens before emitting any text. Raise `--max-completion-tokens` (default 256). Not an outage. |
 | Inference validation fails only for a `GlobalBatch` deployment | It should be skipped, not failed — batch deployments serve the asynchronous Batch API and reject synchronous calls. If it is being probed, the deployment's SKU is not reporting as `GlobalBatch`; check `az cognitiveservices account deployment show --deployment-name <name>`. |
 | Inference validation fails for one model while others pass | Model-specific: check regional capacity for that SKU and confirm the deployment's `provisioningState` is `Succeeded`. Re-run with `--deployment <name>` to iterate quickly without probing the whole account. |
+| Evaluation fails with HTTP 401 while inference validation passes | The two need *different* roles, which is easy to miss because both are data-plane. `Cognitive Services OpenAI User` enumerates specific OpenAI `dataActions` and the evaluations API is not one of them, so it grants inference but not evaluations. Assign **Cognitive Services User** as well (see §4.3b); `main.bicep` does this automatically when `inferenceValidationPrincipalId` is set, so redeploy the environment or grant it manually. Note the wildcard `Microsoft.CognitiveServices/*` data action is what makes it work — `Cognitive Services OpenAI Contributor` does *not*, despite the name, because it is still scoped to the `OpenAI/` path. |
+| Evaluation reports a deployment as `BLOCKED` (exit code 2) | The deployment stayed rate limited after every retry. This is a capacity fault, not a model regression, which is why it is reported separately from `FAIL` and uses a different exit code. Raise that deployment's `sku.capacity` in the environment's `.bicepparam`, or evaluate fewer deployments per run with `--deployment`. |
 | Evaluation run shows `status: completed` but the workflow failed | Working as intended, and an important distinction. An Evals run reports `completed` whenever it finishes executing — *even if every single assertion failed*. `completed` describes the run's lifecycle, not the outcome. `run-evaluations.py` therefore gates on `result_counts` (`passed`/`failed`/`errored`), never on `status`. Gating on `status` would produce a check that passes no matter how badly the model performs. |
 | A model fails evaluation but passes inference validation | Expected, and exactly what this workflow exists to catch. Inference validation only proves the endpoint responded; evaluation proves the answers are still correct. Most commonly the deployment was re-pointed at a new model version whose output formatting changed. Re-run with `keepEval` enabled and inspect the per-item results in the Azure AI Foundry portal before assuming the model is degraded. |
 | Evaluation fails on an answer that looks correct | The grader is an exact/fuzzy string match, not a judge. Unicode variants are the usual culprit — `H₂O` vs `H2O`, curly vs straight quotes, `—` vs `-`. Separator spacing is another: `gpt-4o` writes `11, 13, 17` where other models write `11,13,17`. Fix the question (make the required format explicit) or, if the model is genuinely and repeatably different, update that model's `evaluations/<deployment>.jsonl`. Do not lower `--pass-threshold` to hide it — that also hides real regressions. |

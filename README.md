@@ -281,12 +281,17 @@ python3 scripts/run-evaluations.py --foundry-name devmfdfoundry001 --resource-gr
 deleted from the account when the run finishes; pass `--keep-eval` (or enable `keepEval` in the
 workflow) to retain them for inspection in the Azure AI Foundry portal.
 
-Evaluations are a **data-plane** action and reuse the same **Cognitive Services OpenAI User** role
-granted for inference validation, so deploy the environment at least once before evaluating it.
+Evaluations are a **data-plane** action, but they need a *different* role from inference validation:
+**Cognitive Services User**, not `Cognitive Services OpenAI User`. The latter enumerates specific
+OpenAI data actions and the evaluations API is not among them, so with only that role inference
+succeeds while evaluation creation returns HTTP 401. `main.bicep` grants both, so deploy the
+environment at least once before evaluating it.
 
 Rate limiting is handled explicitly: a throttled item produces no output and would otherwise grade
-as a wrong answer, so HTTP 429 is detected, retried, and — if it persists — reported as a quota
-problem rather than a model quality failure.
+as a wrong answer, so HTTP 429 is detected and the run retried with escalating backoff. If it
+persists the deployment is reported as `BLOCKED` and the script exits **2** rather than 1 — a quota
+shortfall is an infrastructure fault, and giving it the same exit code as wrong answers would send
+someone hunting a model regression that does not exist.
 
 When adding dataset items, prefer questions with a single unambiguous surface form, and **fix an
 ambiguous question rather than encoding a model quirk per model**. Tightening "separated by commas"

@@ -146,7 +146,10 @@ param foundryModelDeployments = [
     }
     sku: {
       name: 'GlobalStandard'
-      capacity: 10
+      // Higher than the other deployments: gpt-5-nano is a reasoning model, so it spends hidden
+      // reasoning tokens before emitting an answer. At capacity 10 the evaluation workflow's
+      // 15-item burst reliably exhausted the TPM window and reported the deployment as BLOCKED.
+      capacity: 100
     }
   }
   {

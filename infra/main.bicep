@@ -81,11 +81,11 @@ param deployApigeeIntegration bool = false
 @description('Display name for the Apigee gateway Entra ID App Registration (only used when deployApigeeIntegration is true)')
 param apigeeGatewayAppDisplayName string = '${namePrefix}-apigee-gateway'
 
-@description('''Object ID (not app ID) of a principal to grant the Cognitive Services OpenAI User role on the
-Foundry resource, so it can call model inference endpoints. Intended for the CI/CD identity that runs
-scripts/validate-inference.py after deployment: inference is a data-plane action, and the control-plane
-roles a deployment identity normally holds (Contributor, Owner, User Access Administrator) carry no
-dataActions, so they do not grant it. Leave empty to skip the assignment.''')
+@description('''Object ID (not app ID) of a principal to grant data-plane access on the Foundry resource, so it
+can call model inference endpoints and create model evaluations. Intended for the CI/CD identity that runs
+scripts/validate-inference.py and scripts/run-evaluations.py after deployment: both are data-plane actions, and
+the control-plane roles a deployment identity normally holds (Contributor, Owner, User Access Administrator)
+carry no dataActions, so they do not grant them. Leave empty to skip the assignments.''')
 param inferenceValidationPrincipalId string = ''
 
 // Variables
@@ -107,6 +107,11 @@ var cosmosDbOperatorRoleId = '230815da-be43-4aae-9cb4-875f7bd000aa'
 var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
 var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
 var cognitiveServicesOpenAIUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
+// Cognitive Services User. Cognitive Services OpenAI User grants the inference actions but not the
+// evaluations ones (its dataActions list specific OpenAI paths, and /openai/v1/evals is not among
+// them), so creating an evaluation returns HTTP 401 with only that role. This role's dataActions are
+// Microsoft.CognitiveServices/*, which covers evaluations on an AIServices-kind account.
+var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
 
 // NOTE: This template never creates the resource group. `resourceGroupName` must reference an
 // already-existing resource group (e.g. pre-created by CI/CD via `az group create`, or manually).
@@ -264,6 +269,24 @@ module inferenceValidationRoleAssignment 'modules/role-assignment.bicep' = if (!
     principalType: 'ServicePrincipal'
     resourceId: foundry.outputs.id
   }
+}
+
+// Grant the same CI/CD identity the Cognitive Services User role, which the model evaluations
+// (scripts/run-evaluations.py) need. The OpenAI User role above is not sufficient: it enumerates
+// specific OpenAI dataActions and the evaluations API is not one of them, so evaluation creation
+// fails with HTTP 401 "Principal does not have access to API/Operation" while inference succeeds.
+module evaluationRoleAssignment 'modules/role-assignment.bicep' = if (!empty(inferenceValidationPrincipalId)) {
+  name: 'assign-evaluation-role-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
+  params: {
+    principalId: inferenceValidationPrincipalId
+    roleDefinitionId: cognitiveServicesUserRoleId
+    principalType: 'ServicePrincipal'
+    resourceId: foundry.outputs.id
+  }
+  dependsOn: [
+    inferenceValidationRoleAssignment
+  ]
 }
 
 // Deploy Foundry Projects as child resources of the Foundry resource. When agentSetupType is
