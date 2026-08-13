@@ -24,6 +24,14 @@ infra/
 └── prod-secondary-region.main.bicepparam  # Production, westus2 (multi-region example)
 azure.yaml                              # azd project config
 .github/workflows/deploy-foundry.yml    # CI/CD pipeline
+.github/workflows/evaluate-models.yml   # On-demand model quality evaluation
+scripts/
+├── validate-inference.py               # Post-deployment inference smoke test
+└── run-evaluations.py                  # Graded model quality evaluation (Evals API)
+evaluations/
+├── models.json                         # Per-model datasets, thresholds, prompts
+├── default.jsonl                       # Fallback dataset
+└── <deployment>.jsonl                  # Per-model expected answers (e.g. gpt-4o.jsonl)
 docs/                                   # This documentation set
 ├── architecture.md
 ├── deployment-guide.md                 # This document
@@ -156,6 +164,7 @@ In repo **Settings → Environments**, create `DEV`, `STG`, `PROD` (and `PROD-SE
 |---|---|---|
 | `validate` | PR to `main`, push to `main` | Ensures the resource group exists (`az group create`, idempotent), then `az deployment sub validate` across the DEV and DEV-STANDARD matrix entries (both authenticate via the `DEV` GitHub Environment) |
 | `deploy-manual` | `workflow_dispatch` | Ensures the resource group exists (in the overridden region, if `region` input is set), then on-demand deploy to a chosen environment (`DEV`/`DEV-STANDARD`/`STG`/`PROD`/`PROD-SECONDARY-REGION`). The `.bicepparam` file is selected from the raw input (`infra/<lowercased-input>.main.bicepparam`), but the GitHub Environment used for secrets/OIDC is `DEV` for both `DEV` and `DEV-STANDARD`. After a successful deploy it reconciles model deployments (see §5.1), then validates that every deployed model actually serves inference (see §4.3a) |
+| `evaluate` | `workflow_dispatch` (separate workflow, `evaluate-models.yml`) | Runs a graded question/answer dataset against every chat deployment on the target environment and fails if accuracy drops below the pass threshold (see §4.3b) |
 
 This is intentionally a simple two-stage pipeline: `validate` gives fast feedback on every PR/push,
 and all actual deployments go through the explicit, auditable `deploy-manual` on-demand trigger
@@ -218,6 +227,109 @@ az role assignment create \
   --role "Cognitive Services OpenAI User" \
   --scope $(az cognitiveservices account show -n <foundry> -g <rg> --query id -o tsv)
 ```
+
+### 4.3b Model quality evaluations
+
+Inference validation (§4.3a) proves a deployment **responds**. It cannot tell you whether the model
+is still **correct**. A deployment re-pointed at a newer model version, or one silently routed
+elsewhere, will return a fluent-but-wrong answer and pass a smoke test unchanged.
+
+The **Evaluate Models** workflow (`.github/workflows/evaluate-models.yml`) closes that gap. It runs a
+graded question/answer dataset through the Azure OpenAI Evals API
+(`{endpoint}/openai/v1/evals`) and fails when accuracy drops below a threshold.
+
+It is a separate, dispatch-only workflow rather than a step in the deploy pipeline, because it takes
+minutes rather than seconds and is usually run against an already-deployed environment.
+
+**Trigger:** *Actions → Evaluate Models → Run workflow*, or:
+
+```powershell
+gh workflow run evaluate-models.yml -f environment=DEV
+gh workflow run evaluate-models.yml -f environment=DEV -f deployments="gpt-4o gpt-5-mini" -f passThreshold=1.0
+```
+
+**Grading.** Every item is scored by two deterministic criteria, and must pass **both**:
+
+| Criterion | Purpose |
+|---|---|
+| `string_check` (`ilike`) | Catches gross breakage — the expected answer is absent entirely. |
+| `text_similarity` (`fuzzy_match` ≥ 0.6) | Tolerates trailing punctuation, capitalisation, and minor wording drift. |
+
+Deterministic graders are chosen over an LLM judge because they are reproducible, add no second
+model as a dependency, and cost nothing extra to run.
+
+A deployment passes when at least `passThreshold` (default `0.8`) of the dataset items pass.
+`GlobalBatch` and embedding deployments are skipped automatically, as neither serves synchronous
+question/answer traffic.
+
+**Per-model datasets.** Models word correct answers differently, so each deployment is graded
+against its own expected answers rather than one shared file. With loosely-worded instructions
+`gpt-4o` answers `11, 13, 17` where every other deployment answers `11,13,17`; under the `ilike`
+substring grader that is a real pass/fail difference, and a shared dataset would report a false
+failure for whichever model did not match.
+
+Resolution order for a deployment, highest priority first:
+
+1. an explicit `--dataset` on the command line — applies to every deployment, which keeps ad-hoc and
+   negative-control runs predictable
+2. the deployment's `dataset` entry in `evaluations/models.json`
+3. `evaluations/<deployment>.jsonl`, if that file exists
+4. the manifest's `default` block
+5. `--default-dataset` (`evaluations/default.jsonl`)
+
+`evaluations/models.json` additionally supports per-model `passThreshold`, `systemPrompt`,
+`similarityThreshold` and `similarityMetric`. A deployment only needs an entry when it differs from
+the defaults, since per-model files already resolve by convention. `similarityThreshold` and
+`similarityMetric` belong to the evaluation definition rather than the run, so deployments differing
+on either automatically get their own evaluation created.
+
+`model-router` is the one deployment with a manifest entry today: it forwards each request to
+whichever underlying model it judges best, so its answering model can change between runs with no
+change to this repository. It is given a slightly lower threshold so routing churn alone does not
+fail the pipeline.
+
+**Rate limiting.** A throttled item returns no content, which naive grading scores as a wrong
+answer — reporting a capacity problem as a quality regression. HTTP 429 is therefore detected in the
+run's `output_items`, retried (`--max-run-retries`, default 2), and if it persists reported
+explicitly as a TPM quota problem rather than a model failure.
+
+**Token budget.** Reasoning models spend hidden tokens before emitting text, so a small budget
+yields empty answers. `--max-completions-tokens` (default 2000) sets the per-item budget. Note the
+plural — the Evals API spells this `max_completions_tokens`, unlike the chat completions API's
+`max_completion_tokens`.
+
+Run it locally:
+
+```bash
+python3 scripts/run-evaluations.py \
+  --foundry-name devmfdfoundry001 \
+  --resource-group dev-mfd-foundry-rg
+```
+
+Exit codes match `validate-inference.py`: `0` all passed, `1` at least one deployment fell below the
+threshold, `2` could not run at all. Useful flags: `--deployment <name>` (repeatable),
+`--pass-threshold`, `--similarity-threshold`, `--similarity-metric` (`fuzzy_match`, `bleu`,
+`rouge_l`, `meteor`), `--dataset`, `--default-dataset`, `--manifest`, `--max-completions-tokens`,
+`--max-run-retries`, `--keep-eval`.
+
+**Cleanup.** Evaluation definitions are created per distinct grading configuration and deleted in a
+`finally` block, so cancelled runs still clean up. `--keep-eval` retains them for inspection in the
+Azure AI Foundry portal.
+
+**Required permission:** the same **Cognitive Services OpenAI User** data-plane role described in
+§4.3a. Because that role is granted by `main.bicep` during a deploy, deploy an environment at least
+once before evaluating it.
+
+**Writing dataset items.** Each `.jsonl` holds one JSON object per line with `question`, `answer`,
+and `category`; lines beginning `//` are treated as comments. Prefer questions whose correct answer
+has a single unambiguous surface form, and phrase them to force a terse reply ("Reply with only the
+city name").
+
+Fix an ambiguous question in preference to encoding a model quirk per model. Tightening "separated
+by commas" to "separated by commas, with no spaces" made all seven deployments answer identically
+and eliminated an item that had been intermittently failing `gpt-5.5`. Similarly, "the chemical
+symbol for water" was removed because `gpt-4o` answers `H₂O` with a Unicode subscript — correct, but
+failing an exact-match grader. False alarms cost more than a slightly smaller dataset.
 
 ### 4.4 Trigger a manual deployment
 
@@ -320,3 +432,11 @@ onboarding), see [`model-lifecycle-demo.md`](model-lifecycle-demo.md).
 | Inference validation reports `empty content (finish_reason=length)` | A reasoning model consumed the whole token budget on hidden reasoning tokens before emitting any text. Raise `--max-completion-tokens` (default 256). Not an outage. |
 | Inference validation fails only for a `GlobalBatch` deployment | It should be skipped, not failed — batch deployments serve the asynchronous Batch API and reject synchronous calls. If it is being probed, the deployment's SKU is not reporting as `GlobalBatch`; check `az cognitiveservices account deployment show --deployment-name <name>`. |
 | Inference validation fails for one model while others pass | Model-specific: check regional capacity for that SKU and confirm the deployment's `provisioningState` is `Succeeded`. Re-run with `--deployment <name>` to iterate quickly without probing the whole account. |
+| Evaluation run shows `status: completed` but the workflow failed | Working as intended, and an important distinction. An Evals run reports `completed` whenever it finishes executing — *even if every single assertion failed*. `completed` describes the run's lifecycle, not the outcome. `run-evaluations.py` therefore gates on `result_counts` (`passed`/`failed`/`errored`), never on `status`. Gating on `status` would produce a check that passes no matter how badly the model performs. |
+| A model fails evaluation but passes inference validation | Expected, and exactly what this workflow exists to catch. Inference validation only proves the endpoint responded; evaluation proves the answers are still correct. Most commonly the deployment was re-pointed at a new model version whose output formatting changed. Re-run with `keepEval` enabled and inspect the per-item results in the Azure AI Foundry portal before assuming the model is degraded. |
+| Evaluation fails on an answer that looks correct | The grader is an exact/fuzzy string match, not a judge. Unicode variants are the usual culprit — `H₂O` vs `H2O`, curly vs straight quotes, `—` vs `-`. Separator spacing is another: `gpt-4o` writes `11, 13, 17` where other models write `11,13,17`. Fix the question (make the required format explicit) or, if the model is genuinely and repeatably different, update that model's `evaluations/<deployment>.jsonl`. Do not lower `--pass-threshold` to hide it — that also hides real regressions. |
+| Evaluation reports `rate limited (HTTP 429)` | A capacity problem, not a quality problem. Throttled items return no content and would otherwise be graded as wrong answers, so 429 is detected and the run retried (`--max-run-retries`, default 2). If it persists the deployment needs more TPM quota — check `az cognitiveservices usage list --location <region>`. Evaluating a single deployment at a time with `--deployment` also reduces pressure. |
+| A model intermittently fails one item | Check whether the answers are empty: that is throttling or too small a token budget, not a wrong expected answer. Raise `--max-completions-tokens` (default 2000) for reasoning models. If the answer is present but varies in format between runs, the question is ambiguous — tighten its wording rather than encoding one variant. |
+| Evaluation items report `errored` rather than `failed` | `errored` means the item never reached a grader, so it is not a model-quality signal — treat it as an infrastructure fault. Check the run's `output_items` for the per-item error; the run-level message (`All examples failed due to invalid user input`) is deliberately vague and rarely identifies the cause. |
+| Evaluation times out | Each deployment's run is polled up to `--run-timeout` (default 900s); a full sweep of ~7 chat deployments against an 8-item dataset takes roughly 3-4 minutes. A single run exceeding the timeout usually means the deployment has no available capacity — confirm with `scripts/validate-inference.py --deployment <name>` first, since that fails in seconds. |
+| Evaluation fails with `'response_format' of type 'json_schema' is not supported with this model` | Only applies if the script is modified to use an LLM (`score_model`) grader. Judge models must support structured outputs; `gpt-4o` pinned at `2024-05-13` predates that support. Use a newer judge deployment, or stay with the default deterministic graders, which have no such constraint. |

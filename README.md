@@ -43,7 +43,12 @@
 │   ├── prod.main.bicepparam         # Production parameters, eastus (Standard Agent Setup example)
 │   └── prod-secondary-region.main.bicepparam  # Production parameters, westus2 (multi-region example)
 ├── scripts
-│   └── validate-inference.py        # Post-deployment inference smoke test (calls every deployed model)
+│   ├── validate-inference.py        # Post-deployment inference smoke test (calls every deployed model)
+│   └── run-evaluations.py           # Graded model-quality evaluation via the Azure OpenAI Evals API
+├── evaluations
+│   ├── models.json                  # Per-model datasets, thresholds and prompts
+│   ├── default.jsonl                # Fallback dataset
+│   └── <deployment>.jsonl           # Per-model expected answers (e.g. gpt-4o.jsonl)
 ├── docs
 │   ├── architecture.md              # Resource model, auth, multi-region, Apigee/Entra ID design
 │   ├── deployment-guide.md          # Step-by-step deployment instructions
@@ -223,6 +228,72 @@ Inference is a **data-plane** action, so Contributor/Owner do not grant it. The 
 own object ID and passes it as `inferenceValidationPrincipalId`; `main.bicep` then assigns
 **Cognitive Services OpenAI User** on the Foundry account. Set `runInferenceValidation` to `false` to
 skip the step. See `docs/deployment-guide.md` §4.3a.
+
+### Model Evaluations
+
+Inference validation proves a model **responds**. It does not prove the model is still **correct** —
+a deployment that has been re-pointed at a new model version will happily return fluent nonsense and
+still pass a smoke test. The **Evaluate Models** workflow (`.github/workflows/evaluate-models.yml`)
+closes that gap by running a graded dataset through the Azure OpenAI Evals API.
+
+| | Inference validation | Model evaluations |
+|---|---|---|
+| Question answered | Does the deployment serve traffic? | Does it return correct answers? |
+| Runs | Automatically after every deploy | On demand (`workflow_dispatch`) |
+| Duration | Seconds | ~30s per chat deployment |
+| Fails when | A model returns an error or empty response | Accuracy drops below `passThreshold` |
+
+Each dataset item is graded by two deterministic criteria that must **both** pass:
+
+- `string_check` (`ilike`) — catches gross breakage, where the expected answer is absent entirely.
+- `text_similarity` (`fuzzy_match` ≥ 0.6) — tolerates harmless wording differences such as
+  trailing punctuation or capitalisation.
+
+Deterministic graders are used deliberately in preference to an LLM judge: they are reproducible,
+add no second model as a dependency, and cost nothing extra. A deployment passes when at least
+`passThreshold` (default 80%) of items pass.
+
+**Each deployment is graded against its own dataset**, because models word correct answers
+differently. With loosely-worded instructions `gpt-4o` replies `11, 13, 17` where every other
+deployment replies `11,13,17` — under a substring grader that is a genuine pass/fail split, so one
+shared dataset would report a false failure. Datasets resolve in this order:
+
+1. an explicit `--dataset` on the command line (applies to every deployment — useful for ad-hoc runs)
+2. the deployment's `dataset` in `evaluations/models.json`
+3. `evaluations/<deployment>.jsonl`, if that file exists
+4. `evaluations/default.jsonl`
+
+`evaluations/models.json` also carries per-model `passThreshold`, `systemPrompt`,
+`similarityThreshold` and `similarityMetric`. `model-router` is given a slightly lower threshold
+there, since it forwards each request to whichever model it judges best, so its answering model can
+change between runs with no change to this repository.
+
+```bash
+# every chat deployment, each against its own dataset
+python3 scripts/run-evaluations.py --foundry-name devmfdfoundry001 --resource-group dev-mfd-foundry-rg
+
+# a single deployment, stricter gate
+python3 scripts/run-evaluations.py --foundry-name devmfdfoundry001 --resource-group dev-mfd-foundry-rg \
+  --deployment gpt-4o --pass-threshold 1.0
+```
+
+`GlobalBatch` and embedding deployments are skipped automatically. Evaluation definitions are
+deleted from the account when the run finishes; pass `--keep-eval` (or enable `keepEval` in the
+workflow) to retain them for inspection in the Azure AI Foundry portal.
+
+Evaluations are a **data-plane** action and reuse the same **Cognitive Services OpenAI User** role
+granted for inference validation, so deploy the environment at least once before evaluating it.
+
+Rate limiting is handled explicitly: a throttled item produces no output and would otherwise grade
+as a wrong answer, so HTTP 429 is detected, retried, and — if it persists — reported as a quota
+problem rather than a model quality failure.
+
+When adding dataset items, prefer questions with a single unambiguous surface form, and **fix an
+ambiguous question rather than encoding a model quirk per model**. Tightening "separated by commas"
+to "separated by commas, with no spaces" made all seven deployments answer identically and removed
+a flaky item. Likewise, "What is the chemical symbol for water?" was dropped because a correct model
+may answer `H₂O` with a Unicode subscript and fail an exact-match grader — a false alarm erodes
+trust in the gate faster than a slightly smaller dataset.
 
 The Bicep CLI is installed/upgraded via `az bicep install` / `az bicep upgrade` (no manual binary downloads), and a `concurrency` group prevents overlapping runs of this workflow on the same branch from racing each other.
 

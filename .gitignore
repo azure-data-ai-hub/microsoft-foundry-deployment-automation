@@ -9,5 +9,9 @@
 Thumbs.db
 *.log
 
+# Python bytecode (scripts/ is stdlib-only Python)
+__pycache__/
+*.pyc
+
 # What-if output artifacts
 whatif-*.txt

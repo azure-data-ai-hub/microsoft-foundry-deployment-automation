@@ -1,0 +1,44 @@
+{
+  "$comment": [
+    "Per-model evaluation settings for scripts/run-evaluations.py.",
+    "Models phrase correct answers differently, so each deployment is graded against",
+    "its own expected answers rather than one shared dataset.",
+    "",
+    "Resolution order for a deployment, highest priority first:",
+    "  1. an explicit --dataset on the command line (applies to every deployment)",
+    "  2. the deployment's 'dataset' below",
+    "  3. evaluations/<deployment>.jsonl, if that file exists",
+    "  4. the 'default' block below",
+    "  5. built-in defaults / other command-line flags",
+    "",
+    "Because per-model files already resolve by convention, a deployment only needs an",
+    "entry here when it also needs a different threshold, system prompt, or a dataset",
+    "path that does not match its deployment name.",
+    "",
+    "Settings: dataset, systemPrompt, passThreshold, similarityThreshold, similarityMetric",
+    "(fuzzy_match | bleu | rouge_l | meteor). similarityThreshold and similarityMetric are",
+    "properties of the evaluation definition, so deployments that differ on either get",
+    "their own evaluation created automatically."
+  ],
+
+  "default": {
+    "dataset": "evaluations/default.jsonl",
+    "systemPrompt": "Answer as concisely as possible.",
+    "passThreshold": 0.8,
+    "similarityThreshold": 0.6,
+    "similarityMetric": "fuzzy_match"
+  },
+
+  "deployments": {
+    "model-router": {
+      "$comment": [
+        "model-router forwards each request to whichever underlying model it judges",
+        "best, so the answering model can change between runs without any change to",
+        "this repository. Its expected answers are therefore the least stable of any",
+        "deployment, and it is given a slightly lower bar so that routing churn does",
+        "not fail the pipeline on its own."
+      ],
+      "passThreshold": 0.75
+    }
+  }
+}

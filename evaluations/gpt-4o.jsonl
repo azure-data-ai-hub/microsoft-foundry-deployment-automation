@@ -1,0 +1,20 @@
+// Expected answers for the 'gpt-4o' deployment.
+// Kept per-model because models word correct answers differently: with looser
+// phrasing gpt-4o replies '11, 13, 17' where other deployments reply '11,13,17'.
+// Prefer tightening an ambiguous question over encoding a model quirk here; only
+// diverge when a model is genuinely and repeatably different.
+{"question": "What is the capital of France? Reply with only the city name.", "answer": "Paris", "category": "factual"}
+{"question": "What is 12 multiplied by 12? Reply with only the numeral.", "answer": "144", "category": "arithmetic"}
+{"question": "Who wrote the play Hamlet? Reply with only the author's surname.", "answer": "Shakespeare", "category": "factual"}
+{"question": "Which planet is known as the Red Planet? Reply with only the planet name.", "answer": "Mars", "category": "factual"}
+{"question": "Complete this sequence with only the next number: 2, 4, 8, 16,", "answer": "32", "category": "reasoning"}
+{"question": "What is the chemical symbol for gold? Reply with only the symbol.", "answer": "Au", "category": "factual"}
+{"question": "Translate the English word 'hello' into Spanish. Reply with only the translated word.", "answer": "hola", "category": "instruction-following"}
+{"question": "In what year did Apollo 11 first land humans on the Moon? Reply with only the year.", "answer": "1969", "category": "factual"}
+{"question": "What is 137 multiplied by 46? Reply with only the numeral.", "answer": "6302", "category": "arithmetic"}
+{"question": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost in cents? Reply with only the numeral.", "answer": "5", "category": "reasoning"}
+{"question": "Reply with only compact JSON, no code fence: an object with key \"status\" set to \"ok\".", "answer": "{\"status\":\"ok\"}", "category": "instruction-following"}
+{"question": "A train travels 60 km in one hour. How far does it travel in 3 hours? Reply with only the number of kilometres as a numeral.", "answer": "180", "category": "reasoning"}
+{"question": "Reply with exactly this one word and nothing else: ACKNOWLEDGED", "answer": "ACKNOWLEDGED", "category": "instruction-following"}
+{"question": "Name the three additive primary colours of light. Reply with only the three colour names separated by commas.", "answer": "red, green, blue", "category": "instruction-following"}
+{"question": "List exactly three prime numbers greater than 10. Reply with only the three numerals separated by commas, with no spaces.", "answer": "11,13,17", "category": "instruction-following"}
