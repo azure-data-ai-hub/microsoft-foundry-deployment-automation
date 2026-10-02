@@ -255,6 +255,8 @@ def resolve_plan(deployment, args, manifest):
       3. evaluations/<deployment>.jsonl, if it exists
       4. the manifest's "default" block
       5. the built-in defaults / other command-line flags
+
+    An explicit --pass-threshold overrides manifest thresholds.
     """
     defaults = manifest.get("default", {}) or {}
     entry = (manifest.get("deployments", {}) or {}).get(deployment, {}) or {}
@@ -282,7 +284,8 @@ def resolve_plan(deployment, args, manifest):
         "dataset": dataset,
         "dataset_source": source,
         "system_prompt": pick("systemPrompt", args.system_prompt),
-        "pass_threshold": float(pick("passThreshold", args.pass_threshold)),
+        "pass_threshold": (args.pass_threshold if args.pass_threshold is not None
+                           else float(pick("passThreshold", 0.8))),
         "similarity_threshold": float(pick("similarityThreshold", args.similarity_threshold)),
         "similarity_metric": pick("similarityMetric", args.similarity_metric),
     }
@@ -540,8 +543,9 @@ def parse_args():
                    help="Optional JSON manifest of per-model datasets and thresholds.")
     p.add_argument("--deployment", action="append", default=[],
                    help="Evaluate only this deployment (repeatable).")
-    p.add_argument("--pass-threshold", type=float, default=0.8,
-                   help="Minimum fraction of graded items that must pass (default 0.8).")
+    p.add_argument("--pass-threshold", type=float, default=None,
+                   help="Override the minimum fraction of graded items that must pass "
+                        "(otherwise use the manifest threshold, default 0.8).")
     p.add_argument("--similarity-threshold", type=float, default=0.6,
                    help="Threshold for the text_similarity grader (default 0.6).")
     p.add_argument("--similarity-metric", default="fuzzy_match",
@@ -569,7 +573,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    if not 0.0 <= args.pass_threshold <= 1.0:
+    if args.pass_threshold is not None and not 0.0 <= args.pass_threshold <= 1.0:
         print("ERROR: --pass-threshold must be between 0 and 1.", file=sys.stderr)
         return 2
 
@@ -606,7 +610,9 @@ def main():
         print("  datasets:       per-model, falling back to {}".format(args.default_dataset))
         print("  manifest:       {}".format(
             args.manifest if manifest else "{} (not present)".format(args.manifest)))
-    print("  pass threshold: {:.0%} of items (unless overridden per model)".format(args.pass_threshold))
+    print("  pass threshold: {}".format(
+        "{:.0%} of items (override)".format(args.pass_threshold)
+        if args.pass_threshold is not None else "per-model, default 80%"))
     print("  deployments:    {}".format(len(selected)))
     print("")
 

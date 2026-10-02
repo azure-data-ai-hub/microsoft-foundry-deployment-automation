@@ -15,6 +15,7 @@
     "entry here when it also needs a different threshold, system prompt, or a dataset",
     "path that does not match its deployment name.",
     "",
+    "An explicit --pass-threshold overrides default and per-model passThreshold values.",
     "Settings: dataset, systemPrompt, passThreshold, similarityThreshold, similarityMetric",
     "(fuzzy_match | bleu | rouge_l | meteor). similarityThreshold and similarityMetric are",
     "properties of the evaluation definition, so deployments that differ on either get",
