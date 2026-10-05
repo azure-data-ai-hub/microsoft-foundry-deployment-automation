@@ -34,6 +34,11 @@ on:
         required: false
         type: boolean
         default: false
+      grantEvaluationAccess:
+        description: 'Grant the deployment identity the role required to run model evaluations.'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   id-token: write
@@ -185,6 +190,49 @@ jobs:
             echo "DEPLOY_REGION=${{ vars.AZURE_LOCATION || 'eastus' }}" >> $GITHUB_ENV
             echo "PARAM_OVERRIDES=" >> $GITHUB_ENV
           fi
+
+      - name: Resolve model evaluation role assignment
+        shell: bash
+        if: github.event.inputs.grantEvaluationAccess != 'false'
+        run: |
+          set -euo pipefail
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          PARAM_JSON=$(az bicep build-params --file "$PARAM_FILE" --stdout | jq -r '.parametersJson')
+          FOUNDRY_NAME=$(echo "$PARAM_JSON" | jq -r '.parameters.foundryName.value')
+          RESOURCE_GROUP=$(grep -oP "(?<=param resourceGroupName = ')[^']+" "$PARAM_FILE")
+
+          # Resolve the service principal object ID from ARM role assignments; AZURE_CLIENT_ID
+          # is the application ID, and resolving it through Microsoft Graph may be unauthorized.
+          OBJECT_ID=$(az role assignment list \
+            --assignee "${{ secrets.AZURE_CLIENT_ID }}" \
+            --scope "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --query "[0].principalId" -o tsv 2>/dev/null || true)
+
+          if [ -z "$OBJECT_ID" ] || [ "$OBJECT_ID" = "None" ]; then
+            echo "::warning::Could not resolve the deployment identity's object ID; skipping the evaluation role grant."
+            exit 0
+          fi
+
+          ROLE_ASSIGNMENT_NAME=""
+          FOUNDRY_ID=$(az cognitiveservices account show \
+            --name "$FOUNDRY_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query id -o tsv 2>/dev/null || true)
+          if [ "$FOUNDRY_ID" = "None" ]; then
+            FOUNDRY_ID=""
+          fi
+          if [ -n "$FOUNDRY_ID" ]; then
+            ROLE_ASSIGNMENT_NAME=$(az role assignment list \
+              --assignee "$OBJECT_ID" \
+              --scope "$FOUNDRY_ID" \
+              --query "[?contains(roleDefinitionId, 'a97b65f3-24c7-4388-baec-2e87135dc908')].name | [0]" \
+              -o tsv)
+            if [ "$ROLE_ASSIGNMENT_NAME" = "None" ]; then
+              ROLE_ASSIGNMENT_NAME=""
+            fi
+          fi
+
+          echo "PARAM_OVERRIDES=${{ env.PARAM_OVERRIDES }} inferenceValidationPrincipalId=$OBJECT_ID evaluationRoleAssignmentName=$ROLE_ASSIGNMENT_NAME" >> "$GITHUB_ENV"
 
       - name: Ensure resource group exists
         shell: bash
