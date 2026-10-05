@@ -133,18 +133,6 @@ param foundryModelDeployments = [
     }
   }
   {
-    // Optimized for ChatGPT-style conversational tasks
-    name: 'gpt-chat-latest'
-    model: {
-      name: 'gpt-chat-latest'
-      version: '2026-05-05'
-    }
-    sku: {
-      name: 'GlobalStandard'
-      capacity: 50
-    }
-  }
-  {
     // Faster, cost-efficient version for well-defined tasks
     name: 'gpt-5-mini'
     model: {

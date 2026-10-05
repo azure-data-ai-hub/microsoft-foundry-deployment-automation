@@ -16,14 +16,14 @@
 ```powershell
 git pull
 
-# Confirm baseline: should list exactly 7 models, no gpt-4o-mini
+# Confirm baseline: should list exactly 8 models, no gpt-4o-mini
 az cognitiveservices account deployment list `
   --name devmfdfoundry001 --resource-group dev-mfd-foundry-rg `
   --query "[].name" -o tsv
 ```
 
-Expected: `gpt-4o`, `gpt-5.5`, `gpt-5.4`, `gpt-chat-latest`, `gpt-5-nano`,
-`text-embedding-ada-002`, `gpt-5-mini`
+Expected: `gpt-4o`, `gpt-5.5`, `gpt-5.4`, `gpt-5-nano`, `gpt-5.4-batch`,
+`model-router`, `text-embedding-ada-002`, `gpt-5-mini`
 
 Have open in tabs:
 1. `infra/dev.main.bicepparam` in VS Code
@@ -44,7 +44,7 @@ gh workflow run deploy-foundry.yml -f environment=DEV
 ```
 
 **Show in the log:**
-- `Show deployment summary` → "7 Foundry model deployment(s)"
+- `Show deployment summary` → "8 Foundry model deployment(s)"
 - `Reconcile model deployments` → desired vs actual lists, then
   **"No orphaned model deployments - Azure matches the parameter file."**
 - Job summary → **"Model deployments in sync ✅"**
@@ -86,13 +86,13 @@ gh workflow run deploy-foundry.yml -f environment=DEV
 ```
 
 **Show in the log:**
-- `Show deployment summary` → now **"8 Foundry model deployment(s)"**
+- `Show deployment summary` → now **"9 Foundry model deployment(s)"**
 - `List deployed resources` → `gpt-4o-mini` with state `Succeeded`
-- `Reconcile model deployments` → still **in sync** (8 desired, 8 actual)
+- `Reconcile model deployments` → still **in sync** (9 desired, 9 actual)
 
 **Show in the portal:** refresh Model deployments → `gpt-4o-mini` is live.
 
-> **Key point to land:** the other 7 deployments were untouched. ARM Incremental
+> **Key point to land:** the other 8 deployments were untouched. ARM Incremental
 > mode is additive — no downtime, no redeploy of existing models.
 
 ---
@@ -119,9 +119,9 @@ gh workflow run deploy-foundry.yml -f environment=DEV
 ```
 
 **Show in the log:**
-- `Show deployment summary` → back to "7 Foundry model deployment(s)" and
+- `Show deployment summary` → back to "8 Foundry model deployment(s)" and
   **"Orphaned model deployments: report only"**
-- `Reconcile model deployments` → desired has 7, actual still has 8
+- `Reconcile model deployments` → desired has 8, actual still has 9
 - ⚠️ **`##[warning] Orphaned model deployment 'gpt-4o-mini' exists in Azure
   but is not in ./infra/dev.main.bicepparam`** — with the exact `az` delete
   command inline
@@ -171,7 +171,7 @@ az cognitiveservices account deployment list `
   --query "[].name" -o tsv
 ```
 
-Back to 7. **Show in the portal:** `gpt-4o-mini` is gone.
+Back to 8. **Show in the portal:** `gpt-4o-mini` is gone.
 
 > **Key point to land:** On STG/PROD this same run also passes through the
 > GitHub Environment approval gate — so a destructive prune needs a reviewer
