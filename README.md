@@ -225,8 +225,9 @@ python3 scripts/validate-inference.py --foundry-name devmfdfoundry001 --resource
 ```
 
 Inference is a **data-plane** action, so Contributor/Owner do not grant it. The pipeline resolves its
-own object ID and passes it as `inferenceValidationPrincipalId`; `main.bicep` then assigns
-**Cognitive Services OpenAI User** on the Foundry account. Set `runInferenceValidation` to `false` to
+own object ID and idempotently ensures **Cognitive Services OpenAI User** and
+**Cognitive Services User** on the Foundry account after the ARM deployment. Set
+`runInferenceValidation` to `false` to
 skip the step. See `docs/deployment-guide.md` §4.3a.
 
 ### Model Evaluations

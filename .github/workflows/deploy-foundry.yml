@@ -196,8 +196,8 @@ jobs:
         if: github.event.inputs.runInferenceValidation != 'false'
         run: |
           set -euo pipefail
-          # main.bicep needs the deploy identity's *object* ID to grant it the data-plane
-          # Cognitive Services OpenAI User role. AZURE_CLIENT_ID is the app ID, and resolving
+          # The post-deployment RBAC step needs the deploy identity's *object* ID.
+          # AZURE_CLIENT_ID is the app ID, and resolving
           # app -> object via 'az ad sp show' needs Microsoft Graph permissions the deploy
           # identity is not guaranteed to hold. Reading an existing role assignment stays on
           # ARM, which the identity can already read, and returns the object ID directly.
@@ -212,7 +212,7 @@ jobs:
           fi
 
           echo "Deploy identity object ID: $OBJECT_ID"
-          echo "PARAM_OVERRIDES=${{ env.PARAM_OVERRIDES }} inferenceValidationPrincipalId=$OBJECT_ID" >> $GITHUB_ENV
+          echo "INFERENCE_VALIDATION_PRINCIPAL_ID=$OBJECT_ID" >> $GITHUB_ENV
 
       - name: Ensure resource group exists
         shell: bash
@@ -279,6 +279,62 @@ jobs:
           parameters: ./infra/${{ env.ENV_LOWER }}.main.bicepparam ${{ env.PARAM_OVERRIDES }}
           deploymentName: 'foundry-${{ github.event.inputs.environment }}-${{ github.run_number }}'
           failOnStdErr: false
+
+      - name: Ensure validation data-plane roles
+        shell: bash
+        if: steps.deploy.outcome == 'success' && github.event.inputs.runInferenceValidation != 'false' && env.INFERENCE_VALIDATION_PRINCIPAL_ID != ''
+        run: |
+          set -euo pipefail
+          PARAM_FILE="./infra/${{ env.ENV_LOWER }}.main.bicepparam"
+          PARAM_JSON=$(az bicep build-params --file "$PARAM_FILE" --stdout | jq -r '.parametersJson')
+          FOUNDRY_NAME=$(echo "$PARAM_JSON" | jq -r '.parameters.foundryName.value')
+          FOUNDRY_ID=$(az cognitiveservices account show \
+            --name "$FOUNDRY_NAME" \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --query id -o tsv)
+
+          ensure_role() {
+            local role_id="$1"
+            local role_name="$2"
+            local count
+            count=$(az role assignment list \
+              --assignee-object-id "${{ env.INFERENCE_VALIDATION_PRINCIPAL_ID }}" \
+              --scope "$FOUNDRY_ID" \
+              --include-inherited \
+              --role "$role_id" \
+              --query "length(@)" -o tsv)
+
+            if [ "$count" -gt 0 ]; then
+              echo "$role_name already grants access; leaving the existing assignment unchanged."
+              return
+            fi
+
+            local create_error
+            if ! create_error=$(az role assignment create \
+                --assignee-object-id "${{ env.INFERENCE_VALIDATION_PRINCIPAL_ID }}" \
+                --assignee-principal-type ServicePrincipal \
+                --role "$role_id" \
+                --scope "$FOUNDRY_ID" \
+                --only-show-errors \
+                --output none 2>&1); then
+              count=$(az role assignment list \
+                --assignee-object-id "${{ env.INFERENCE_VALIDATION_PRINCIPAL_ID }}" \
+                --scope "$FOUNDRY_ID" \
+                --include-inherited \
+                --role "$role_id" \
+                --query "length(@)" -o tsv)
+              if [ "$count" -eq 0 ]; then
+                echo "$create_error" >&2
+                return 1
+              fi
+              echo "$role_name was assigned concurrently; using the existing assignment."
+              return
+            fi
+            echo "Assigned $role_name."
+          }
+
+          ensure_role "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd" "Cognitive Services OpenAI User"
+          ensure_role "a97b65f3-24c7-4388-baec-2e87135dc908" "Cognitive Services User"
 
       - name: Reconcile model deployments
         shell: bash
