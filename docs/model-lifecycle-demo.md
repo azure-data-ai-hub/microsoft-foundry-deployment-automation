@@ -16,14 +16,14 @@
 ```powershell
 git pull
 
-# Confirm baseline: should list exactly 7 models, no gpt-4o-mini
+# Confirm baseline: should list exactly 6 models, no gpt-4o-mini
 az cognitiveservices account deployment list `
   --name devmfdfoundry001 --resource-group dev-mfd-foundry-rg `
   --query "[].name" -o tsv
 ```
 
-Expected: `gpt-4o`, `gpt-5.5`, `gpt-5.4`, `gpt-chat-latest`, `gpt-5-nano`,
-`text-embedding-ada-002`, `gpt-5-mini`
+Expected: `gpt-4o`, `gpt-5.5`, `gpt-5.4`, `gpt-5-nano`, `text-embedding-ada-002`,
+`gpt-5-mini`
 
 Have open in tabs:
 1. `infra/dev.main.bicepparam` in VS Code
