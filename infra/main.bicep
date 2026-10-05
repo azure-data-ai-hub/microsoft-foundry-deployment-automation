@@ -81,6 +81,12 @@ param deployApigeeIntegration bool = false
 @description('Display name for the Apigee gateway Entra ID App Registration (only used when deployApigeeIntegration is true)')
 param apigeeGatewayAppDisplayName string = '${namePrefix}-apigee-gateway'
 
+@description('Object ID of the CI/CD principal to grant the Cognitive Services User role for model evaluations')
+param inferenceValidationPrincipalId string = ''
+
+@description('Existing Cognitive Services User role assignment name to reuse, if already assigned')
+param evaluationRoleAssignmentName string = ''
+
 // Variables
 var mergedTags = union(
   {
@@ -100,6 +106,7 @@ var cosmosDbOperatorRoleId = '230815da-be43-4aae-9cb4-875f7bd000aa'
 var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
 var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
 var cognitiveServicesOpenAIUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
+var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
 
 // NOTE: This template never creates the resource group. `resourceGroupName` must reference an
 // already-existing resource group (e.g. pre-created by CI/CD via `az group create`, or manually).
@@ -242,6 +249,20 @@ module apigeeGatewayRoleAssignment 'modules/role-assignment.bicep' = if (deployA
     roleDefinitionId: cognitiveServicesOpenAIUserRoleId
     principalType: 'ServicePrincipal'
     resourceId: foundry.outputs.id
+  }
+}
+
+// Grant the CI/CD identity access to the evaluations API. The OpenAI User role does not
+// include the evaluation data actions.
+module evaluationRoleAssignment 'modules/role-assignment.bicep' = if (!empty(inferenceValidationPrincipalId)) {
+  name: 'assign-evaluation-role-${uniqueString(subscription().id, resourceGroupName)}'
+  scope: resourceGroup(resourceGroupName)
+  params: {
+    principalId: inferenceValidationPrincipalId
+    roleDefinitionId: cognitiveServicesUserRoleId
+    principalType: 'ServicePrincipal'
+    resourceId: foundry.outputs.id
+    roleAssignmentName: evaluationRoleAssignmentName
   }
 }
 

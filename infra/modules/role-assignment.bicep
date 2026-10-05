@@ -19,6 +19,9 @@ param principalType string = 'ServicePrincipal'
 @description('Resource ID to assign the role at')
 param resourceId string
 
+@description('Existing role assignment name to reuse, if one already exists')
+param roleAssignmentName string = ''
+
 // Extract resource type and name from resourceId
 var resourceIdParts = split(resourceId, '/')
 var resourceType = '${resourceIdParts[6]}/${resourceIdParts[7]}'
@@ -46,7 +49,7 @@ resource targetSearchResource 'Microsoft.Search/searchServices@2024-06-01-previe
 
 resource roleAssignmentKv 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (resourceType == 'Microsoft.KeyVault/vaults') {
   scope: targetResource
-  name: guid(resourceId, principalId, roleDefinitionId)
+  name: !empty(roleAssignmentName) ? roleAssignmentName : guid(resourceId, principalId, roleDefinitionId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleDefinitionId)
     principalId: principalId
@@ -56,7 +59,7 @@ resource roleAssignmentKv 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 
 resource roleAssignmentStorage 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (resourceType == 'Microsoft.Storage/storageAccounts') {
   scope: targetStorageResource
-  name: guid(resourceId, principalId, roleDefinitionId)
+  name: !empty(roleAssignmentName) ? roleAssignmentName : guid(resourceId, principalId, roleDefinitionId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleDefinitionId)
     principalId: principalId
@@ -66,7 +69,7 @@ resource roleAssignmentStorage 'Microsoft.Authorization/roleAssignments@2022-04-
 
 resource roleAssignmentAiServices 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (resourceType == 'Microsoft.CognitiveServices/accounts') {
   scope: targetAiServicesResource
-  name: guid(resourceId, principalId, roleDefinitionId)
+  name: !empty(roleAssignmentName) ? roleAssignmentName : guid(resourceId, principalId, roleDefinitionId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleDefinitionId)
     principalId: principalId
@@ -76,7 +79,7 @@ resource roleAssignmentAiServices 'Microsoft.Authorization/roleAssignments@2022-
 
 resource roleAssignmentCosmosDb 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (resourceType == 'Microsoft.DocumentDB/databaseAccounts') {
   scope: targetCosmosDbResource
-  name: guid(resourceId, principalId, roleDefinitionId)
+  name: !empty(roleAssignmentName) ? roleAssignmentName : guid(resourceId, principalId, roleDefinitionId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleDefinitionId)
     principalId: principalId
@@ -86,7 +89,7 @@ resource roleAssignmentCosmosDb 'Microsoft.Authorization/roleAssignments@2022-04
 
 resource roleAssignmentSearch 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (resourceType == 'Microsoft.Search/searchServices') {
   scope: targetSearchResource
-  name: guid(resourceId, principalId, roleDefinitionId)
+  name: !empty(roleAssignmentName) ? roleAssignmentName : guid(resourceId, principalId, roleDefinitionId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleDefinitionId)
     principalId: principalId
